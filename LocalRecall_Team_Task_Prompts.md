@@ -1,12 +1,12 @@
 # LocalRecall Team Task Prompts
 
-These prompts assume the primary Codex agent has already scaffolded the repository and committed the manual MVP. Use Git worktrees so the three agents do not edit the same files.
+These prompts assume the primary Codex agent has already scaffolded and committed `app/contracts.py` and the mock facade, so the real manual MVP can be built in parallel. Use Git worktrees so the three agents do not edit the same files.
 
 ---
 
 # Setup by the technical member
 
-Run once from the main repository after the initial scaffold commit:
+Run once from the main repository after the shared facade contract and mock scaffold commit:
 
 ```bash
 git worktree add ../localrecall-ui -b feature/ui
@@ -19,178 +19,81 @@ Open three separate Codex threads or windows:
 - UI agent at `../localrecall-ui`.
 - Evaluation/demo agent at `../localrecall-eval`.
 
-The two less-technical members should not need to use SSH or Git commands themselves. The technical member opens the correct folder, pastes the relevant prompt, and then lets that member guide the agent by reviewing visible results.
+The two less-technical members must NOT be required to use SSH, `git`, or terminal commands. The core member opens the worktrees, starts the Gradio UI/mock service, and establishes the SSH port forward on the presenter laptop. Friends interact through the local browser and their already-open Codex sessions. The camera lives in the PRESENTER LAPTOP, not in the headless Spark.
 
 ---
 
-# Prompt A: Product Experience and UI Member
+# Prompt A: Gradio Product Experience Member
 
-You are the product-experience implementation agent for LocalRecall. A separate core agent owns the backend and model integration. Your job is to make the existing application understandable, polished, and demo-ready without changing backend behavior.
+You own ONLY the Gradio UI for LocalRecall. The core member owns Qwen serving, **browser-frame ingestion logic (not local USB camera access)**, memory, backend behavior, `app/facade.py`, and `app/contracts.py`. Build a clean, reliable, visually compelling UX against a **mock facade first**, and do not attempt to take over backend work.
 
 ## Path ownership
 
-You may modify only:
+You may edit only:
 
 ```text
-app/static/**
-tests/test_static_assets.py
-tests/test_frontend_contract.py
+app/ui/**
+tests/test_ui_contract.py
 TASK_UI.md
 UI_HANDOFF.md
 ```
 
-Do not modify Python backend files, database code, model code, API paths, Makefile, or deployment scripts. If an API appears missing, document the needed contract in `UI_HANDOFF.md`; do not invent a competing backend.
+Read `LocalRecall_Implementation_Blueprint.md` sections 19-20, `app/contracts.py`, `AGENTS.md`, and `README.md`. If `app/contracts.py` is missing, write the required contract request into `UI_HANDOFF.md` and proceed using a locally typed mock for the documented methods; do not modify backend code. Write a brief plan to `TASK_UI.md`.
 
-## Read first
+## Mandatory stack and launch modes
 
-Read:
+Use **Python Gradio Blocks** only. Do NOT build React/Vite/Vue, custom HTML/CSS/JS client files, a FastAPI HTTP application layer, or WebSockets. Put the UI in `app/ui/app.py`, the callback wrappers in `app/ui/callbacks.py`, rendering helpers in `app/ui/transforms.py`, and fixture-only mock implementation in `app/ui/mock_facade.py`.
 
-- `AGENTS.md`
-- `README.md`
-- `ARCHITECTURE.md`
-- current OpenAPI schema from the running app if available
-- all files under `app/static/`
+The following must launch cleanly without any model download or camera:
 
-Write a short plan into `TASK_UI.md` before editing.
+```bash
+python -m app.ui.app --mock --port 7861
+```
 
-## Product goal
+Integrate with the real backend facade when the core developer provides it:
 
-The interface should make this story obvious within ten seconds:
+```bash
+python -m app.ui.app --backend --port 7860
+```
 
-1. The camera is watching one workspace.
-2. The system remembers object movements locally.
-3. The user can ask where an object is.
-4. Every answer has visible evidence.
-5. Continuous video is not stored.
+Do not instantiate models or camera captures from UI modules. All calls go through the facade protocol. Do not make fake data look like real recorded events in backend mode.
 
-## Required tabs
+## Product screens
 
-Build or improve these tabs in one responsive single-page UI:
+Implement five tabs:
 
-### Live
+1. **Watch**: optional browser-owned `gr.Image(sources=["webcam"], type="numpy", streaming=True)` for live preview/automatic Watch; TWO SEPARATE non-streaming `gr.Image(sources=["webcam", "upload"], type="numpy")` inputs labeled BEFORE and AFTER with Analyze button invoking `facade.analyze_pair`. Show stale/unavailable source and retain upload-only mode. Do NOT poll server webcam.
+2. **Memory**: current object table, event timeline, review queue, approve/reject controls, before/after/comparison evidence gallery.
+3. **Ask**: textbox, examples, database-backed answer, event ID, image, confidence. Never invent answers.
+4. **Setup**: object enrollment (`gr.Image` crop/upload or backend snapshot), default three zones, simple named normalized rectangle inputs. No JavaScript canvas is required.
+5. **System & Privacy**: true current health/offline/model status, event/evidence counters, Export Session, Delete All Memory with explicit confirmation.
 
-Show:
+Prefer a simple, readable interface over elaborate styling. Put technical details in a small optional section. Keep all assets local and Gradio sharing disabled.
 
-- live camera feed,
-- zone overlays,
-- large Watch Mode toggle,
-- current state pill such as Stable, Motion, Settling, Analyzing, or Review,
-- motion score,
-- latest-event card,
-- Manual Remember buttons for Capture BEFORE and Capture AFTER and Analyze.
+## Timers, responsiveness, and error handling
 
-### Objects
+Use `gr.Timer` to call lightweight facade getter methods every 0.5-1.0 seconds with `queue=False`. **The browser owns the webcam.** Register `.stream()` on the webcam-only input with `stream_every=0.5`, `time_limit=60`, `queue=False`, and an INGEST-ONLY callback calling `facade.ingest_frame`. A `gr.State` session ID may identify the producer; do not store object memory there. Never run inference from a streaming or timer handler. Long-running manual analysis must be a queued action; display a busy indicator and restore button state on failure. `gr.State` is only for ephemeral UI selections, not object history, model process, or camera objects.
 
-Show:
+If an operation errors, display the error to the user; never silently swallow it. Do not create fake online/offline status. No external CDN, fonts, analytics, model APIs, or Gradio share tunnels. The app is visited from the laptop via `http://127.0.0.1:7860` using an SSH local port forward configured by the core member; do not ask friends to use raw `http://SPARK_IP:7860` for webcam access (browser secure-context restrictions).
 
-- enrolled objects,
-- reference image,
-- display name,
-- aliases,
-- enrollment controls,
-- clear empty state.
+## Acceptance checklist
 
-### Zones
+Verify in mock mode with browser and tests:
 
-Show:
-
-- current zone list,
-- snapshot and canvas editor if the existing API supports it,
-- Load Demo Layout button,
-- delete controls,
-- clear instructions.
-
-### Memory
-
-Show:
-
-- chronological event cards,
-- large BEFORE and AFTER thumbnails,
-- object and movement summary,
-- confidence,
-- timestamp,
-- accepted/review/uncertain status,
-- evidence text,
-- accept or correct controls when supported.
-
-### Ask
-
-Show:
-
-- prominent question input,
-- suggested questions,
-- answer card,
-- event references,
-- evidence thumbnail.
-
-### Privacy and System
-
-Show:
-
-- Local and Offline badge,
-- model name,
-- model and camera health,
-- number of saved events and images,
-- clear text saying continuous raw video is not retained,
-- Delete All Memory with confirmation,
-- latency summary and VLM call count when supplied by the API.
-
-## Visual direction
-
-Use a polished appliance aesthetic:
-
-- dark or neutral background,
-- strong readable typography,
-- one restrained accent color,
-- high contrast,
-- large status indicators,
-- rounded evidence cards,
-- obvious BEFORE and AFTER labels,
-- no excessive gradients or animation,
-- no developer-looking JSON on the main screen.
-
-Add a Technical Details disclosure rather than putting jargon everywhere.
-
-## Reliability requirements
-
-- Handle API errors visibly and politely.
-- Never leave buttons stuck in loading state.
-- Disable controls while a request is running.
-- Show camera/model offline states clearly.
-- Preserve the last visible successful event if WebSocket reconnects.
-- Avoid external fonts, CDNs, analytics, and cloud assets.
-- Everything must work offline.
-- No console errors during the primary demo flow.
-
-## Acceptance flow
-
-Use the running backend or mock data and verify:
-
-1. Open app.
-2. See Live tab.
-3. Load demo zones.
-4. View enrolled objects.
-5. Capture manual BEFORE.
-6. Capture manual AFTER and analyze.
-7. See event card.
-8. Ask where the object is.
-9. See answer and evidence.
-10. Open Privacy tab.
-
-Add narrow tests that verify required DOM IDs or data attributes used by the existing JavaScript. Do not add a Node build system.
+1. Launch UI at `localhost:7861` without model/camera.
+2. Show all five tabs and realistic fixture data clearly marked MOCK.
+3. Upload or capture BEFORE and AFTER in two distinct browser inputs, click Analyze, and show an evidence record; it must NOT require an active stream.
+4. Ask where the keys are; show answer and evidence.
+5. Show pending review and approve/reject path.
+6. Show empty and backend error states.
+7. Show confirmation for destructive data deletion.
+8. Start a laptop-browser webcam stream and verify ingress status increments in mock mode without model or Spark camera.
+9. Stop/close browser camera and verify stale/disconnected indicator.
+10. Run `pytest tests/test_ui_contract.py` with actual results.
 
 ## Handoff
 
-When done:
-
-1. Run the relevant tests.
-2. Record exact results in `UI_HANDOFF.md`.
-3. List every file changed.
-4. List any backend API contract still needed.
-5. Commit with a descriptive message.
-6. Do not merge into main yourself.
-
----
+Commit only owned files and write `UI_HANDOFF.md` with changed paths, test results, screenshots if available, and any missing backend-facade methods. Do not merge your worktree yourself.
 
 # Prompt B: Evaluation, Demo, and Submission Member
 
@@ -215,7 +118,7 @@ EVAL_HANDOFF.md
 README.md sections explicitly marked RESULTS or DEMO
 ```
 
-Do not modify model-serving scripts, database implementation, motion implementation, API behavior, or UI files. If a required API is missing, document it in `EVAL_HANDOFF.md`.
+Do not modify model-serving scripts, database implementation, motion implementation, facade methods, or UI files. If a required facade capability is missing, document it in `EVAL_HANDOFF.md`.
 
 ## Read first
 
@@ -225,7 +128,7 @@ Read:
 - `README.md`
 - `ARCHITECTURE.md`
 - `RUNBOOK.md`
-- existing API documentation
+- the Python facade contract in `app/contracts.py`
 - existing event and evaluation schemas
 
 Write a short plan into `TASK_EVAL.md` before editing.
@@ -260,7 +163,7 @@ Create at least 20 planned trials across:
 `run_eval.py` should:
 
 1. Load a JSONL or CSV manifest.
-2. Submit each fixture through the existing application or event-analysis API.
+2. Evaluate each fixture through the backend/facade or direct event analyzer (no REST API required).
 3. Record raw predictions.
 4. Compare predictions with ground truth.
 5. Calculate, when data exists:
@@ -317,7 +220,7 @@ The script must include:
 10. State real measured results.
 11. End with privacy and impact.
 
-Create a fallback version for use with a recorded demo if the camera fails.
+Create a fallback version using uploaded BEFORE and AFTER screenshots (and a prerecorded short video if available), so the demo survives browser camera denial, lack of camera, dropped SSH stream, or UI streaming failure. Do not rely on a USB camera connected to Spark.
 
 ## Devpost draft
 
@@ -348,7 +251,9 @@ Create `PITCH_QA.md` with concise answers to likely questions:
 - Why not run the VLM on every frame?
 - What happens when the model is wrong?
 - Is video stored?
-- How do you prove it works offline?
+- How do you prove inference works without external WAN while the laptop-to-Spark LAN remains connected?
+- Why must the browser use localhost/HTTPS to access its webcam?
+- What happens when the laptop tab closes and the stream stops?
 - Why is SQLite the source of truth?
 - What are the current limitations?
 - What did each member build?
@@ -375,10 +280,11 @@ When done:
 
 You own the main worktree and the integration. Follow `LocalRecall_Codex_Master_Prompt.md` as the primary instruction. In addition:
 
-- Keep API contracts stable after the UI and evaluation worktrees begin.
+- Keep the Python `LocalRecallFacade` protocol stable after the UI and evaluation worktrees begin.
 - Use mock inference to unblock teammates.
 - Merge only after each branch has tests and a handoff file.
 - Resolve conflicts yourself; do not ask less-technical members to use Git.
-- Give each member a working browser URL and a five-minute explanation of their task.
+- Establish the SSH localhost tunnel on the presenter laptop and give each friend a working local browser session (no SSH knowledge required). Explain that a webcam is required only on the browser machine; show both snapshot/upload fallback and optional stream.
+- Give each member a five-minute explanation of their task.
 - Preserve `manual-mvp` and create a final known-good tag before submission.
 - Schedule two architecture teach-backs so every member can answer judge questions.

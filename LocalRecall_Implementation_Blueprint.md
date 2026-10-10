@@ -4,7 +4,7 @@
 
 **Target hardware:** ASUS Ascent GX10 / NVIDIA DGX Spark-class GB10 system
 
-**Working environment:** Ubuntu 24.04 LTS, 4 TB storage, 128 GB unified memory, one GB10 Blackwell SoC
+**Working environment:** Headless Ubuntu 24.04 LTS DGX Spark (4 TB, 128 GB unified memory, one GB10). **No camera or display attached to Spark.** The laptop browser supplies images over a private local connection. **Important eligibility:** final judged submission must run on the organizer-provided ASUS Ascent GX10, not exclusively on the personal development Spark; verify model/container availability there before the demo.
 
 **Team:** 3 people total
 
@@ -25,7 +25,7 @@ Build a local visual-memory appliance that watches one bounded workspace, detect
 
 The winning technical idea is not continuous video captioning. It is **event-triggered semantic memory**:
 
-1. Cheap classical computer vision watches for motion.
+1. Cheap classical computer vision watches for motion **in browser-supplied frames**; manual image-pair analysis works even without streaming.
 2. The system keeps only a short in-memory ring buffer.
 3. Once motion stops, it selects one clean BEFORE frame and one clean AFTER frame.
 4. It creates a labeled comparison image containing zones and registered-object references.
@@ -35,7 +35,7 @@ The winning technical idea is not continuous video captioning. It is **event-tri
 
 This is deliberately scoped to be reliable in a hackathon:
 
-- One fixed camera.
+- One fixed laptop webcam (or a USB camera attached to the laptop, never the headless Spark); manual uploads require no camera at all.
 - Three to five enrolled objects.
 - Three to four named zones.
 - One meaningful object movement per event.
@@ -48,8 +48,8 @@ This is deliberately scoped to be reliable in a hackathon:
 
 The project should make four local-AI benefits visible during the demo:
 
-1. **Privacy:** camera frames and memory remain on the GX10.
-2. **Offline operation:** disconnect internet access and repeat the live demonstration.
+1. **Privacy:** frames travel only between the presenter laptop and the local Spark through a protected SSH/LAN connection; inference and persistent memory stay on the GX10. Do not incorrectly claim the browser camera originates on the Spark.
+2. **Offline operation:** show that no outside-WAN or cloud model connection is needed while KEEPING the laptop-to-Spark SSH/LAN connection active. Disconnecting the LAN itself would prevent headless browser access.
 3. **Low operational cost:** no per-frame cloud API calls and no cloud video storage.
 4. **Responsiveness and personalization:** objects, aliases, zones, and memories are specific to one user and one workspace.
 
@@ -115,22 +115,21 @@ If image input does not work through vLLM after 60 to 90 minutes of focused debu
 
 The project is not considered viable until this entire sequence works:
 
-1. Open the local web UI.
-2. See a live camera view.
-3. Configure or load three named zones.
-4. Enroll at least three objects.
-5. Start Watch Mode.
-6. Move one object from one zone to another.
-7. See an event appear automatically or through the manual fallback.
-8. Ask, `Where are my keys?`
-9. Receive the current zone plus BEFORE/AFTER evidence.
-10. Disable external internet access and repeat the query.
-11. Show that continuous raw video was not saved.
+1. Start Gradio on the headless Spark and reach it in the presenter laptop browser via SSH `-L` tunnel.
+2. Use TWO separate browser `gr.Image` inputs (webcam snapshots or file uploads) to provide BEFORE and AFTER scenes; **no continuous stream required**.
+3. Configure/load three named zones and enroll three objects.
+4. Submit the image pair to the local Qwen model and see an evidence-backed event.
+5. Ask `Where are my keys?` and receive the current zone plus BEFORE/AFTER evidence.
+6. Disable only external internet (maintain the LAN/SSH connection) and repeat the query.
+7. Show that the application does not intentionally persist continuous video, disclose Gradio temporary-file retention, and demonstrate memory deletion.
+
+The automated browser-camera Watch Mode is a P1 enhancement; it must NEVER block P0.
 
 ## 4.2 P1: strong judging version
 
 Add only after P0 is reliable:
 
+- Stream ~2 fps from the presenter laptop webcam into `BrowserPushSource` using Gradio `.stream`, then drive the same event pipeline through OpenCV.
 - Low-confidence review and one-click correction.
 - Recent-event timeline.
 - Queries such as `What changed in the last five minutes?`
@@ -160,7 +159,7 @@ Use a controlled tabletop, not a general room.
 
 Recommended setup:
 
-- Fixed USB webcam mounted overhead or at a stable 45-degree angle.
+- Presenter laptop webcam (or USB webcam plugged into the LAPTOP) fixed overhead/at 45 degrees. NO camera attaches to the Spark; screenshots/video uploads also work.
 - 720p or 1080p capture, but process a smaller frame for motion detection.
 - Stable lighting with no window glare.
 - Three visibly distinct objects, for example:
@@ -183,53 +182,41 @@ Avoid transparent objects, nearly identical items, reflective metal under glare,
 # 6. End-to-end architecture
 
 ```text
-USB webcam or fixture video
-        |
-        v
-Camera capture thread -----> in-memory ring buffer only
-        |
-        v
-ROI-aware motion detector and state machine
-        |
-        +---- no meaningful scene change ----> discard
-        |
-        v
-Clean stable BEFORE and AFTER frames
-        |
-        v
-Composite builder
-- BEFORE/AFTER labels
-- named zone overlays
-- enrolled-object reference strip
-        |
-        v
-Local Qwen3.8-27B-NVFP4 endpoint
-        |
-        v
-Strict event JSON
-        |
-        v
-Pydantic validation + deterministic rules + one retry
-        |
-        +---- low confidence ----> review queue, no state mutation
-        |
-        v
-SQLite append-only event log
-        |
-        +----> materialized object state
-        +----> evidence thumbnails
-        +----> metrics
-        |
-        v
-FastAPI local web application
-- live view
-- object enrollment
-- zone editor
-- event timeline
-- question answering
-- privacy controls
-- performance panel
+PRESENTER LAPTOP (webcam, Chrome/Firefox browser)
+  |  Manual mode: gr.Image BEFORE + AFTER (snapshots OR uploads)
+  |  Optional Watch: gr.Image(sources=["webcam"], streaming=True)
+  |  Client webcam permission; camera never lives on Spark
+  v
+SSH local port forwarding: http://127.0.0.1:7860 (browser-side URL)
+  |  local network only, no third-party tunnel
+  v
+HEADLESS DGX SPARK (Gradio Blocks Python process, 127.0.0.1:7860)
+  |  facade.ingest_frame(RGB, source_id) --> BrowserPushSource RAM ring
+  |  facade.analyze_pair(before_rgb, after_rgb) --> manual P0
+  |  FixtureSource --> same backend pipeline
+  v
+Optional OpenCV motion gate (for streamed Watch mode only)
+  |
+  v
+BEFORE / AFTER stable RGB frames
+  |
+  v
+Composite image: zones, object references, BEFORE/AFTER labels
+  |
+  v
+Qwen3.8-27B-NVFP4 local endpoint (127.0.0.1:8000)
+  |
+  v
+Strict event JSON --> Pydantic validation --> review policy
+  |
+  v
+SQLite event log, materialized object state, event evidence
+  |
+  v
+Gradio Watch / Memory / Ask / Setup / System & Privacy
 ```
+
+The browser laptop is a capture **client**, not a cloud inference provider. The Spark performs all model inference and data storage. Streaming samples are not sent to Qwen individually. A manual image pair and a completed motion event must converge on the same `analyze_pair`/event pipeline. A browser tab closing can interrupt live capture without corrupting memory.
 
 ---
 
@@ -251,10 +238,12 @@ localrecall/
 ├── .gitignore
 ├── app/
 │   ├── __init__.py
-│   ├── main.py
+│   ├── facade.py
+│   ├── contracts.py
 │   ├── config.py
 │   ├── schemas.py
-│   ├── camera.py
+│   ├── camera.py               # BrowserPushSource / FixtureSource (no /dev/video)
+│   ├── frame_source.py         # frame ingress/lease/health
 │   ├── motion.py
 │   ├── zones.py
 │   ├── composite.py
@@ -269,11 +258,12 @@ localrecall/
 │   │   ├── event_extractor.txt
 │   │   ├── event_repair.txt
 │   │   └── query_answer.txt
-│   └── static/
-│       ├── index.html
-│       ├── app.js
-│       ├── styles.css
-│       └── assets/
+│   └── ui/
+│       ├── __init__.py
+│       ├── app.py
+│       ├── callbacks.py
+│       ├── transforms.py
+│       └── mock_facade.py
 ├── data/
 │   ├── .gitkeep
 │   ├── objects/
@@ -298,12 +288,14 @@ localrecall/
     ├── test_memory_store.py
     ├── test_query_service.py
     ├── test_composite.py
-    ├── test_api.py
+    ├── test_facade.py
+    ├── test_browser_frame_ingest.py
+    ├── test_ui_contract.py
     ├── test_event_pipeline_mock.py
     └── fixtures/
 ```
 
-No framework should be added merely because it is fashionable. FastAPI, vanilla HTML/CSS/JavaScript, OpenCV, Pillow, Pydantic, HTTPX, and SQLite are sufficient.
+Keep the stack small: Gradio Blocks, OpenCV, Pillow, Pydantic, HTTPX (only for the local VLM endpoint), NumPy, and SQLite. No additional REST web framework, frontend build tool, or WebSocket stack is necessary.
 
 ---
 
@@ -486,42 +478,67 @@ The event log is the historical source of truth. `object_state` is a materialize
 
 ---
 
-# 10. Camera capture design
+# 10. Headless camera transport and frame-source design
 
-## 10.1 Capture thread
+## 10.1 Source contract
 
-Implement one background thread that owns `cv2.VideoCapture`. Other components must not call the camera directly.
+The Spark is **headless**: do NOT search for `/dev/video*` or treat absence of `cv2.VideoCapture(0)` as a failure. The backend consumes validated RGB NumPy arrays, not V4L2 devices.
 
-Default settings:
+Implement these source types behind one `FrameSource` abstraction:
 
-- resolution: 1280 x 720,
-- requested FPS: 15,
-- ring buffer: 60 frames,
-- JPEG preview FPS: 5,
-- motion-analysis size: 320 x 180.
+1. `ManualPairSource`: two browser-provided still images (`gr.Image(sources=["webcam", "upload"], streaming=False, type="numpy")`) handed to `facade.analyze_pair(before, after)`. **P0 and guaranteed fallback.**
+2. `BrowserPushSource`: a single Gradio browser webcam input `gr.Image(sources=["webcam"], streaming=True, type="numpy")` feeds `facade.ingest_frame(frame, source_id)` at about 2 frames/second. Optional automatic Watch Mode, P1.
+3. `FixtureSource`: a known image pair or uploaded video FILE decoded locally (`cv2.VideoCapture(path)`, never device index). Automated tests and fallback.
 
-Each frame record should contain:
+Do not start VLM inference from a `.stream()` callback. Ingest only validates, downsamples, copies to a bounded ring buffer, timestamps receipt, and returns a cheap receipt/health string. The motion worker runs asynchronously against ring-buffer samples. Stream callback must complete quickly enough to sustain the sampling rate.
 
-- monotonic timestamp,
-- UTC wall-clock timestamp,
-- full-resolution BGR frame,
-- downscaled grayscale frame,
-- optional motion score.
+## 10.2 Browser streaming (only after manual MVP)
 
-If no camera is available, the exact same interface must read a looping fixture video. This is essential for development and automated testing.
+The frontend uses:
 
-## 10.2 Camera health
+```python
+webcam_stream = gr.Image(sources=["webcam"], streaming=True, type="numpy")
+webcam_stream.stream(
+    fn=callbacks.ingest_browser_frame,
+    inputs=[webcam_stream, browser_source_id],  # a per-session gr.State token
+    outputs=[ingest_status],
+    stream_every=0.5,
+    time_limit=60,
+    queue=False,
+)
+```
 
-Expose:
+**Keep two separate non-streaming image inputs for manual BEFORE/AFTER capture or upload.** Gradio input image streaming is webcam-only; do not combine streaming=True with `sources=["webcam", "upload"]`. Webcam preview is rendered by the browser camera input itself. A `gr.Timer` refreshes status, event counts, evidence, and memory (not the live browser source component).
 
-- camera connected,
-- source name,
-- current frame age,
-- capture FPS,
-- dropped-frame count,
-- current resolution.
+Use browser-side localhost for secure camera permission:
 
-If the frame is older than two seconds, show a visible camera error in the UI.
+```bash
+# On the Spark:
+python -m app.ui.app --backend --port 7860
+
+# On the PRESENTING LAPTOP, not on the Spark:
+ssh -N -L 7860:127.0.0.1:7860 <spark-user>@<spark-lan-ip>
+
+# In a browser ON THAT LAPTOP:
+# http://127.0.0.1:7860
+```
+
+Browser `getUserMedia()` requires HTTPS or a trustworthy origin such as localhost. Plain `http://<spark-ip>:7860` should NOT be relied upon for webcam access, even on a private LAN. If using a phone browser, use a properly secured HTTPS origin or instead take photos and upload them from the laptop; do not add a public Gradio share link.
+
+## 10.3 Frame validation, motion, disconnects
+
+- Accept only nonempty uint8 RGB HxWx3 arrays. Reject >1920x1080 or a strict decoded-pixel limit, normalize to a consistent geometry, and use 640x360/960x540 for the motion pipeline. Retain bounded evidence-quality frames temporarily in RAM only.
+- Stamp time on server reception using a monotonic clock. Use elapsed times, not frame-count thresholds calibrated for 15fps, because browser capture defaults to ~2fps and may be irregular. **Detect persistent zone change between stable snapshots, not just motion across consecutive frames**: a hand may fully move an object between two 0.5s samples. Preserve the last clean anchor until the scene-change candidate is resolved.
+- Hold at most 60 recent frames in a bounded RAM ring buffer (at 2fps, about 30 seconds of samples); drop old frames rather than enqueue unbounded work.
+- Track source ID, frames received, ingest FPS, dropped frames, seconds since last receipt, and detection mode. Only one browser camera may be the active producer; reject interleaving a second session unless a lease expires or user explicitly selects it.
+- If no frames arrive for 4 seconds, mark source disconnected and pause automatic Watch Mode; maintain manual uploads, database queries, and events.
+- Never assume a laptop browser will keep streaming after its tab closes or sleeps; show explicit Camera Paused/Disconnected badges.
+- Calibrate orientation: browser mirrored selfie-camera preview can invert Left and Right zones. Use a non-mirrored camera if available, or set zones based on the actual image entering the backend. Do a visible A/B/C zone test.
+- User-uploaded videos are stored temporarily for decoding, not retained as continuous raw video. Gradio may create transient cache files for webcam frames/uploads: configure a dedicated temp area, log its real size, clear it on schedule/stop, and never claim zero temporary bytes without measurement.
+
+## 10.4 Offline demonstration definition
+
+All VLM inference happens on `127.0.0.1:8000` and all SQLite persistence on Spark. During the demo, keep the local laptop-to-Spark link active; external WAN/cloud service access may be unavailable. If you disable the ONLY network carrying SSH to the Spark, the browser demo will disconnect. Use a local-only wired/Ethernet or functioning LAN, and demonstrate no outside model endpoint rather than unplugging the critical connection. See `HEADLESS_CAMERA_RUNBOOK.md`.
 
 ---
 
@@ -559,7 +576,7 @@ Suggested starting values:
 
 - stable threshold: 0.008,
 - moving threshold: 0.025,
-- moving confirmation: 3 consecutive frames,
+- moving confirmation: approximately 2 browser samples initially (timestamp-driven; tune to 2fps),
 - pre-event stable duration: 1.0 second,
 - post-event stable duration: 1.2 seconds,
 - cooldown: 1.5 seconds.
@@ -571,7 +588,7 @@ NO_CAMERA
   -> STABLE
 
 STABLE
-  - continuously refresh the clean anchor frame
+  - preserve the last clean anchor until a candidate change is resolved; refresh only when scene still matches the anchor
   - if motion exceeds threshold for N frames -> MOVING
 
 MOVING
@@ -608,21 +625,11 @@ Also add a keyboard shortcut. This fallback uses the same composite, inference, 
 
 ---
 
-# 12. Zone editor
+# 12. Zone configuration (Gradio-friendly)
 
-The zone editor should:
+For the P0 demo, provide a **Load Demo Zones** button for three rectangular workspace areas. Display readable zone outlines and labels on the backend-generated live preview.
 
-1. Freeze a current camera frame.
-2. Let the user draw rectangular zones on a canvas.
-3. Ask for a display name.
-4. Save normalized coordinates.
-5. Show zone labels over the live view.
-6. Reject heavily overlapping zones unless explicitly confirmed.
-7. Allow loading a default demo layout.
-
-Use clear, high-contrast borders and large labels. The visual labels help both humans and the VLM.
-
----
+The Setup tab may accept zone names and normalized rectangle coordinates (`x1, y1, x2, y2`) through ordinary Gradio text/number controls. Validate coordinate ranges and reject heavily overlapping zones unless explicitly confirmed. A browser drag-to-draw canvas is optional P2 scope, not a requirement for the hackathon demo.
 
 # 13. Object enrollment
 
@@ -819,120 +826,59 @@ Do not implement a complex autonomous agent loop for the MVP.
 
 ---
 
-# 19. FastAPI API contract
+# 19. In-process Python facade contract
 
-Minimum endpoints:
+The UI must never access camera, SQLite, or VLM internals directly. Use the single in-process `LocalRecallFacade` protocol from `app/contracts.py`, with concrete adapters in `app/facade.py`, and keep it stable once the UI worktree begins.
 
-```text
-GET    /api/health
-GET    /api/status
-GET    /api/live.mjpg
-GET    /api/snapshot.jpg
-POST   /api/watch/start
-POST   /api/watch/stop
-POST   /api/manual/before
-POST   /api/manual/after
-GET    /api/zones
-POST   /api/zones
-DELETE /api/zones/{zone_id}
-GET    /api/objects
-POST   /api/objects/enroll
-DELETE /api/objects/{object_id}
-GET    /api/events
-GET    /api/events/{event_id}
-POST   /api/events/{event_id}/accept
-POST   /api/events/{event_id}/correct
-POST   /api/query
-GET    /api/metrics/summary
-DELETE /api/memory
-WS     /ws/status
+## Python facade: one shared contract
+
+Gradio and backend communicate through direct Python calls, not a new HTTP API. Implement `app/facade.py` as the adapter to backend services and `app/contracts.py` for dataclasses/Pydantic schemas. Publish these methods before UI work begins:
+
+```python
+class LocalRecallFacade(Protocol):
+    def get_status(self) -> SystemStatus: ...
+    def get_latest_frame(self) -> np.ndarray | None: ...  # from browser ingestion or fixture
+    def ingest_frame(self, frame: np.ndarray, source_id: str) -> dict: ...
+    def analyze_pair(self, before: np.ndarray, after: np.ndarray) -> EventRecord: ...
+    def get_objects(self) -> list[ObjectRecord]: ...
+    def get_zones(self) -> list[ZoneRecord]: ...
+    def get_events(self, limit: int = 50) -> list[EventRecord]: ...
+    def start_watch(self) -> SystemStatus: ...
+    def stop_watch(self) -> SystemStatus: ...
+    def ask(self, question: str) -> QueryResult: ...
+    def enroll_object(self, display_name: str, description: str, reference_image: np.ndarray) -> ObjectRecord: ...
+    def load_demo_zones(self) -> list[ZoneRecord]: ...
+    def approve_event(self, event_id: int) -> EventRecord: ...
+    def reject_event(self, event_id: int) -> EventRecord: ...
+    def get_health(self) -> dict: ...
+    def export_session(self) -> Path: ...
+    def delete_all_memory(self) -> None: ...
 ```
 
-`/api/status` should include:
+Implement both real and mock facades. The mock returns deterministic fixture records and must NOT open the camera, start vLLM, or connect to the model. The real facade owns a single backend-service instance. The real facade ingests RGB frames from browser streaming through a bounded `BrowserPushSource`. Only fixture/video-file decoder code may call `cv2.VideoCapture(path)`; never open `/dev/video*` on Spark. Manual `analyze_pair` works without any active webcam stream. Event history, object state, and privacy settings persist in SQLite, not `gr.State`. Synchronous facade calls may delegate to a worker; do not block Gradio's polling callbacks on model inference.
 
-```json
-{
-  "camera": "ok",
-  "watch_state": "STABLE",
-  "model": "ready",
-  "offline_mode": true,
-  "active_objects": 3,
-  "active_zones": 3,
-  "pending_reviews": 0,
-  "last_event_id": 42,
-  "last_model_latency_ms": 2840
-}
+Use these application entrypoints:
+
+```bash
+python -m app.ui.app --mock --port 7861
+python -m app.ui.app --backend --port 7860
 ```
 
----
+The normal Gradio app binds only `127.0.0.1:7860` on the headless Spark. The presenter opens `http://127.0.0.1:7860` on the LAPTOP via `ssh -N -L 7860:127.0.0.1:7860 <user>@<spark-lan-ip>`, satisfying browser webcam secure-context requirements. Gradio sharing must remain disabled; no independent camera service is needed. The model endpoint binds only `127.0.0.1:8000`.
 
-# 20. Web interface
+# 20. Gradio Blocks interface
 
-Use one polished single-page interface served by FastAPI.
+Use `gr.Blocks` in `app/ui/app.py`; UI callbacks are implemented in `app/ui/callbacks.py` and formatting in `app/ui/transforms.py`. The required tabs are **Watch**, **Memory**, **Ask**, **Setup**, **System & Privacy**.
 
-## 20.1 Required screens or tabs
+- **Watch:** browser-owned `gr.Image(sources=["webcam"], streaming=True)` for optional Watch Mode; independent non-streaming `gr.Image(sources=["webcam", "upload"])` for manual BEFORE and AFTER, Analyze button, connected/stale source status and evidence. Distinguish server-held frame from browser preview.
+- **Memory:** `gr.Dataframe` for current state, timeline, review/approval controls, `gr.Gallery` of BEFORE/AFTER/composite images.
+- **Ask:** `gr.Textbox`, Ask button, evidence-backed answer including event ID, image, and confidence.
+- **Setup:** enroll one of three to five objects with a reference image; load default zones; numeric normalized rectangles are sufficient for the MVP (no drag canvas).
+- **System & Privacy:** actual offline/model/camera status, latency, evidence retention, export, confirmation before delete.
 
-### Live
+Run the UI in mock mode on `localhost:7861` for your teammate, without starting model or camera. Run the integrated UI on `localhost:7860` with the real facade. A `gr.Timer` every 0.5-1.0 seconds refreshes only cheap health/events/evidence with `queue=False`, never the webcam input and never inference. The browser `.stream()` callback does ONLY frame ingestion. The manual Analyze button calls `facade.analyze_pair(before, after)` in a queued handler. Manual BEFORE/AFTER + Analyze executes as a queued click action. Do not use `gr.State` for event truth, and avoid custom JavaScript and remote assets.
 
-- live camera,
-- zone overlays,
-- Watch Mode toggle,
-- large current state indicator,
-- current motion score,
-- latest event card,
-- Manual Remember controls.
-
-### Objects
-
-- enrollment wizard,
-- reference thumbnails,
-- aliases,
-- active/inactive toggle.
-
-### Zones
-
-- draw, name, edit, and delete zones,
-- load demo layout.
-
-### Memory
-
-- chronological event timeline,
-- BEFORE/AFTER evidence,
-- confidence,
-- accept/correct controls.
-
-### Ask
-
-- question input,
-- evidence-backed answer,
-- linked event cards,
-- suggested example questions.
-
-### Privacy and System
-
-- model name,
-- local endpoint status,
-- offline mode,
-- number of persisted event images,
-- statement that continuous video is not retained,
-- Delete All Memory button,
-- inference latency summary,
-- model-call count.
-
-## 20.2 Design direction
-
-Make it look like a finished appliance, not an admin dashboard:
-
-- large readable typography,
-- dark or neutral background,
-- one strong accent color,
-- clear status pills,
-- evidence cards with obvious BEFORE and AFTER labels,
-- very little developer jargon on the main screen.
-
-Keep a hidden or secondary Technical Details drawer for the judges.
-
----
+Use a readable restrained appliance aesthetic, prominent offline/local indication, and clear BEFORE/AFTER evidence. A small secondary technical-details area should explain NVFP4, event-gated inference, SQLite memory, and uncertainty handling to judges.
 
 # 21. Privacy implementation
 
@@ -940,8 +886,9 @@ Privacy must be technically true, not just marketing copy.
 
 Default behavior:
 
-- continuous frames live only in a bounded RAM ring buffer,
+- continuous application frames live only in a bounded RAM ring buffer,
 - no continuous MP4 is written,
+- Gradio may place transient webcam/upload image data in its temp cache. Use a dedicated `GRADIO_TEMP_DIR` when supported, configure pruning/deletion, measure actual temp use, and disclose this instead of falsely claiming zero transient frame files,
 - only accepted or reviewable event images are persisted,
 - all persisted images are listed in the UI,
 - the user can delete all memory,
@@ -963,7 +910,7 @@ When enabled:
 - show an offline badge,
 - log any attempted outbound URL as an error.
 
-For the live judging demonstration, use a USB webcam and a local display so internet can be physically disconnected without breaking the app.
+For live judging, show the laptop webcam streaming to the headless Spark via a PRIVATE SSH tunnel while WAN access is disabled or unnecessary; retain the LAN carrying SSH. If camera streaming is unreliable, switch to the mandatory pair-of-images upload/snapshot workflow. Never disable the only route to the headless server.
 
 ---
 
@@ -982,9 +929,9 @@ free -h
 df -h
 docker --version
 docker info >/tmp/docker-info.txt
-lsusb || true
-v4l2-ctl --list-devices || true
-ls -l /dev/video* 2>/dev/null || true
+hostname -I || true
+ss -ltn 2>/dev/null | head -30 || true
+# Headless Spark: no local webcam/monitor expected; not an error.
 ```
 
 It must locate the existing model cache without redownloading or deleting anything.
@@ -1020,7 +967,7 @@ docker run -d \
   -e TRANSFORMERS_OFFLINE=1 \
   vllm/vllm-openai:qwen38 \
   --model nvidia/Qwen3.8-27B-NVFP4 \
-  --host 0.0.0.0 \
+  --host 127.0.0.1 \
   --port 8000 \
   --tensor-parallel-size 1 \
   --max-model-len 32768 \
@@ -1041,17 +988,13 @@ If the container entrypoint does not accept these flags directly, run `vllm serv
 Suggested Python dependencies:
 
 ```text
-fastapi
-uvicorn[standard]
+gradio
 pydantic
 pydantic-settings
 httpx
 opencv-python-headless
 pillow
 numpy
-python-multipart
-jinja2
-orjson
 rapidfuzz
 pytest
 pytest-asyncio
@@ -1118,7 +1061,7 @@ Run a tiny local mock OpenAI-compatible server that returns scripted JSON. Exerc
 - model call,
 - event insertion,
 - query answer,
-- API response.
+- facade result and Gradio callback output.
 
 This lets the team develop the complete product while the real model server is loading or being debugged.
 
@@ -1214,8 +1157,9 @@ Owns:
 Owns a bounded branch and only edits:
 
 ```text
-app/static/
-tests related to static assets or API rendering
+app/ui/
+tests/test_ui_contract.py
+UI_HANDOFF.md and TASK_UI.md
 ```
 
 Responsibilities:
@@ -1279,7 +1223,7 @@ git worktree add ../localrecall-eval -b feature/eval
 Ownership boundaries:
 
 - main/core worktree: Python backend and integration,
-- UI worktree: `app/static` only,
+- UI worktree: `app/ui/**` and `tests/test_ui_contract.py` only; facade/protocol changes must go through the core owner,
 - evaluation worktree: fixtures, evaluation scripts, and docs only.
 
 Each agent must:
@@ -1310,7 +1254,7 @@ The technical owner merges or cherry-picks. Friends do not need to use Git comma
 
 ### 12:45 to 2:15 - manual end-to-end vertical slice
 
-- scaffold FastAPI app,
+- scaffold Python facade and minimum Gradio Blocks app,
 - implement one manual BEFORE/AFTER flow,
 - create composite,
 - call VLM,
@@ -1323,7 +1267,7 @@ This is the highest-priority block.
 
 ### 2:15 to 4:00 - camera, zones, and automatic gate
 
-- camera thread,
+- BrowserPushSource ingest + disconnect health (NO camera thread),
 - fixture-video fallback,
 - zone editor or default zones,
 - motion state machine,
@@ -1415,8 +1359,8 @@ Do not wait until the 1:30 PM deadline.
 
 ## 0:45 to 1:35 - live demo
 
-- show offline badge,
-- move keys,
+- show local-model status and local-only transport while WAN is unavailable,
+- move keys using laptop webcam or show BEFORE/AFTER uploads,
 - event appears,
 - ask where the keys are,
 - open evidence.
@@ -1447,12 +1391,13 @@ Mention accessibility, elder care, workshops, laboratories, and privacy-sensitiv
 - [ ] Image inference works.
 - [ ] Three objects can be enrolled.
 - [ ] Three zones can be configured.
-- [ ] Manual BEFORE/AFTER path works.
-- [ ] At least one automatic movement path works.
+- [ ] Two browser-supplied images (webcam snapshots or upload) work end-to-end via `analyze_pair`.
+- [ ] The same manual path works with no browser webcam and no server camera.
+- [ ] Optional P1: browser-streamed automatic movement path works.
 - [ ] Accepted event updates SQLite state.
 - [ ] `Where is X?` returns evidence.
-- [ ] Internet can be disconnected after startup.
-- [ ] No continuous video is stored.
+- [ ] WAN/cloud access can be disabled while local LAN/SSH to headless Spark stays active.
+- [ ] No continuous application video is persisted; temporary Gradio cache is measured and cleanup is configured.
 - [ ] Delete All Memory works.
 - [ ] Backup demo video exists.
 - [ ] All three members can explain the system.
@@ -1461,6 +1406,7 @@ Mention accessibility, elder care, workshops, laboratories, and privacy-sensitiv
 
 - [ ] Twenty-trial evaluation completed.
 - [ ] Confidence review works.
+- [ ] Laptop SSH localhost tunnel, browser webcam permission, stale-stream recovery and upload-only fallback verified.
 - [ ] Cold-start runbook verified.
 - [ ] Technical architecture diagram ready.
 - [ ] Devpost submitted before deadline.
