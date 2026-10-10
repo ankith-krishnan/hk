@@ -1,0 +1,1 @@
+{"id": "mock-completion", "object": "chat.completion", "model": "mock/localrecall-fixture", "choices": [{"index": 0, "message": {"role": "assistant", "content": "A red cube is visible in the left zone."}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 10, "completion_tokens": 8, "total_tokens": 18}}

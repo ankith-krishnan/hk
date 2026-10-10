@@ -1,0 +1,6 @@
+Repair the previous event response. Return only one valid JSON object matching the required event schema.
+Do not add facts. If the previous response cannot be safely repaired from the supplied image evidence,
+return event_type "uncertain", null object and zone IDs, confidence 0, and an uncertainty_reason.
+
+Validation error: {{ERROR}}
+Previous response: {{RESPONSE}}

@@ -1,0 +1,11 @@
+{
+  "event_type": "move",
+  "object_id": "red_cube",
+  "from_zone_id": "left_zone",
+  "to_zone_id": "right_zone",
+  "confidence": 0.99,
+  "visible_evidence": [
+    "Mock server fixture moved the red cube from left to right."
+  ],
+  "uncertainty_reason": null
+}

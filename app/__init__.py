@@ -1,0 +1,2 @@
+"""LocalRecall application package."""
+

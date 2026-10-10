@@ -1,445 +1,76 @@
-# LocalRecall  
-**A private, event-sourced visual memory that remembers where objects were placed without storing continuous video or sending frames to the cloud.**
+# LocalRecall
 
-The project uses `nvidia/Qwen3.8-27B-NVFP4` as the only foundation model in the critical path. NVIDIA’s model card lists text, image, and video input support, and says the checkpoint uses NVFP4 for its MLP and language-head layers with FP8 for attention-related layers. The GB10 has Blackwell Tensor Cores with native FP4 support, so your instinct to prioritize the NVFP4 checkpoint is correct. [Hugging Face](https://huggingface.co/nvidia/Qwen3.8-27B-NVFP4)
+LocalRecall is a planned private visual-memory appliance for one bounded tabletop workspace. It records semantic object events and evidence so a user can ask where an enrolled object was last seen, without sending image inference to a cloud service or retaining continuous application video.
 
-I created three files:
+The authoritative implementation requirements are in [LocalRecall_Codex_Master_Prompt.md](LocalRecall_Codex_Master_Prompt.md), [LocalRecall_Implementation_Blueprint.md](LocalRecall_Implementation_Blueprint.md), [LocalRecall_Team_Task_Prompts.md](LocalRecall_Team_Task_Prompts.md), and [HEADLESS_CAMERA_RUNBOOK.md](HEADLESS_CAMERA_RUNBOOK.md). Those documents define the architecture. This README summarizes them and reports implementation state; it does not replace their decisions.
 
-1. **Give this directly to the primary Codex agent.** It tells Codex to inspect the machine, build the repository, run the model, implement the system, test it, maintain status, and preserve fallbacks.
+## Product flow
 
-   :chatgpt-content-reference{index="8"}[Download the Codex master prompt](sandbox:/mnt/data/LocalRecall_Codex_Master_Prompt.md)
+The first acceptance path is manual: provide separate BEFORE and AFTER images in the browser, analyze the pair with a local vision-language model, validate the structured result, store event evidence and accepted state in SQLite, then answer a query from those records. This path must work without a camera or a streaming session.
 
-2. **This is the complete human-readable technical blueprint.** It covers architecture, database schema, APIs, motion detection, prompting, UI, privacy, evaluation, judging, time gates, and acceptance criteria.
-
-   :chatgpt-content-reference{index="9"}[Download the full implementation blueprint](sandbox:/mnt/data/LocalRecall_Implementation_Blueprint.md)
-
-3. **These are bounded prompts for your two less-technical teammates.** One owns the UI through Codex; the other owns evaluation, demo preparation, Devpost, and presentation material.
-
-   :chatgpt-content-reference{index="10"}[Download the team task prompts](sandbox:/mnt/data/LocalRecall_Team_Task_Prompts.md)
-
-## The core architecture
-
-Do **not** run the 27B VLM continuously on webcam frames. That would be slower, harder to debug, and unnecessary.
-
-Use this:
+Optional Watch Mode comes later. The presenter laptop browser owns the webcam and sends sampled frames to the headless GB10 over a private connection. OpenCV detects scene changes from those browser-supplied frames. The system retains a bounded in-memory ring, selects stable BEFORE and AFTER images, and sends a labeled composite to the local model only after a candidate event. The GB10 itself does not need a camera.
 
 ```text
-USB webcam
-    |
-    v
-OpenCV capture thread
-    |
-    v
-Cheap motion detection
-    |
-    +---- no meaningful change ----> discard
-    |
-    v
-Clean BEFORE and AFTER frames
-    |
-    v
-Labeled comparison image
-- BEFORE and AFTER
-- named zone overlays
-- enrolled-object reference images
-    |
-    v
-Qwen3.8-27B-NVFP4 on the local GB10
-    |
-    v
-Strict JSON event
-    |
-    v
-Validation and confidence policy
-    |
-    v
-SQLite event log and current object state
-    |
-    v
-Local web UI
-- live view
-- object enrollment
-- visual timeline
-- natural-language questions
-- evidence
-- privacy controls
+Laptop browser (webcam snapshots, uploads, optional stream)
+             |
+             | SSH local port forward over private LAN
+             v
+Gradio Blocks on GB10 localhost:7860
+             |
+             +--> Python facade --> OpenCV / zones / composites
+             |                         |
+             |                         v
+             |              local vLLM endpoint :8000
+             |                         |
+             +--> SQLite event log <-- validated event JSON
+                         |
+                         +--> evidence-backed answers
 ```
 
-The important product concept is:
+The guiding separation is: OpenCV decides when a scene may have changed, the VLM describes visible evidence, and SQLite owns factual memory. The model is `nvidia/Qwen3.8-27B-NVFP4`, a mixed NVFP4/FP8 multimodal checkpoint. The preferred serving path is the Spark-specific Docker image `vllm/vllm-openai:qwen38`; image inference must be proven before the rest of the application depends on it.
 
-> **Classical vision decides when something changed. The VLM decides what changed. SQLite decides what is true.**
+## Scope and privacy
 
-That separation is what makes the project defensible.
+- Three default zones and a small registry of three to five named objects.
+- One event at a time, with confidence-based acceptance or review.
+- Event evidence and registered-object references may be retained; continuous application video is not written by default.
+- Browser uploads and webcam frames travel over the local laptop-to-GB10 connection. A localhost SSH forward gives the laptop browser a camera-permitted origin; frames do cross that local connection.
+- Gradio may create temporary image cache files. The implementation must use and document a dedicated temporary directory and cleanup behavior, and must not claim that no transient files exist without measuring it.
+- Model requests stay on loopback; no cloud inference APIs, public Gradio sharing, external database, or second web API are part of the design.
+- For an offline demo, disable external WAN access while keeping the laptop-to-GB10 LAN/SSH link active.
 
-## The exact demo
+## Requirements and intended commands
 
-Set up a fixed workspace with three labeled areas:
+The target is Ubuntu 24.04 on an NVIDIA GB10-class system, Python 3.11 or 3.12, Docker with NVIDIA Container Toolkit, and the local Qwen checkpoint. The organizer-provided ASUS Ascent GX10 is the judging target; a personal development Spark is not a substitute.
 
-- Left Tray
-- Center Mat
-- Right Tray
-
-Enroll three visibly distinct objects:
-
-- keys,
-- wallet,
-- red mug.
-
-Then demonstrate:
-
-1. The system is in Watch Mode.
-2. Move the keys from Left Tray to Right Tray.
-3. The UI changes from `Stable` to `Motion`, `Settling`, and `Analyzing`.
-4. An event appears:
-
-```text
-Keys moved
-Left Tray -> Right Tray
-Confidence: 91%
-```
-
-5. Ask:
-
-```text
-Where are my keys?
-```
-
-6. The answer says:
-
-```text
-Your keys were last observed in the Right Tray at 3:24 PM.
-Evidence: Event #12
-```
-
-7. Open the BEFORE/AFTER evidence.
-8. Disconnect external internet access.
-9. Repeat the query.
-10. Open the privacy page and show:
-   - local model,
-   - no cloud endpoint,
-   - no continuous video stored,
-   - only event evidence retained,
-   - Delete All Memory button.
-
-That directly addresses ASUS’s requirements to solve a real problem, show technical originality, and make the value of local AI explicit. The rules require development and demonstration on the GX10, but they do not require using Nemotron. Pasted text
-
-## Why Qwen3.8 is the right primary model
-
-Use:
-
-```text
-nvidia/Qwen3.8-27B-NVFP4
-```
-
-Do not use these in the critical path:
-
-| Model | Decision |
-|---|---|
-| Qwen3.8-27B-NVFP4 | Primary visual and language model |
-| Nemotron 3.5 Lightning BF16 | Drop; text-only and redundant |
-| Alpamayo 1.5 10B | Drop; visually capable but automobile-specialized |
-| Cosmos3-Nano | Drop; powerful but unnecessarily complex for this product |
-| Flash Attention cache | Leave intact; use only as required by the chosen serving container |
-
-NVIDIA’s current DGX Spark vLLM instructions specifically pair a single Spark with `vllm/vllm-openai:qwen38` and `nvidia/Qwen3.8-27B-NVFP4`, so this is not an invented hardware configuration. [NVIDIA NIM APIs](https://build.nvidia.com/spark/vllm/instructions?utm_source=chatgpt.com)
-
-However, there is an important caveat: the general Qwen3.8 vLLM recipe says the architecture is multimodal, but notes that **text serving is the path that was verified in that recipe**. Therefore, image inference must be your first technical gate rather than something you assume will work later. [vLLM Recipes](https://recipes.vllm.ai/Qwen/Qwen3.8-27B)
-
-The master prompt enforces this sequence:
-
-1. Load the model.
-2. Run a text request.
-3. Run a one-image request.
-4. Run a synthetic BEFORE/AFTER image request.
-5. Require parseable JSON.
-6. Repeat in offline mode.
-7. Only then build the rest of the product around it.
-
-If vLLM text works but vision does not after 60–90 minutes of focused debugging, the plan switches to the Spark-supported SGLang path while retaining the same `VLMClient` application interface. NVIDIA documents SGLang on DGX Spark, including NVFP4 model handling and OpenAI-compatible endpoints. [NVIDIA NIM APIs](https://build.nvidia.com/spark/sglang/instructions.md?utm_source=chatgpt.com)
-
-## Why the project is feasible
-
-The system deliberately avoids four difficult problems:
-
-- It does not recognize every object in a room.
-- It does not process every video frame with a VLM.
-- It does not infer where invisible objects went.
-- It does not ask an LLM to be the factual database.
-
-Instead:
-
-- The user enrolls three to five objects.
-- The user defines three to four zones.
-- The camera is fixed.
-- Only one clear object movement is expected per event.
-- OpenCV chooses clean frames after the person’s hand leaves.
-- The VLM receives one carefully labeled comparison image.
-- Invalid or low-confidence model results do not update memory.
-- A manual BEFORE/AFTER capture mode always remains available.
-
-That manual mode is crucial. Even if automatic motion thresholds are imperfect, your actual visual-memory pipeline can still be demonstrated reliably.
-
-## Event format
-
-The model must return something like:
-
-```json
-{
-  "event_type": "move",
-  "object_id": "keys",
-  "from_zone_id": "left_tray",
-  "to_zone_id": "right_tray",
-  "confidence": 0.91,
-  "visible_evidence": [
-    "The key ring is visible in the left tray in BEFORE.",
-    "The same key ring is visible in the right tray in AFTER."
-  ],
-  "uncertainty_reason": null
-}
-```
-
-The application then performs deterministic validation:
-
-- Is `keys` a registered object?
-- Are both zones registered?
-- Are the source and destination different?
-- Is the output valid JSON?
-- Is confidence above the acceptance threshold?
-
-Recommended policy:
-
-```text
->= 0.70       automatically accept
-0.45 - 0.69   place in review queue
-< 0.45        mark uncertain; do not update location
-```
-
-This gives you a very strong answer when judges ask, “What happens when the model hallucinates?”
-
-## Database design
-
-Use SQLite in WAL mode with these tables:
-
-```text
-objects
-zones
-events
-object_state
-queries
-metrics
-settings
-```
-
-The `events` table is append-only historical memory.
-
-The `object_state` table is a derived current view:
-
-```text
-keys -> right_tray -> event #12
-wallet -> center_mat -> event #9
-mug -> left_tray -> event #10
-```
-
-The model never directly answers “where are the keys?” from its conversation history. The application retrieves the last accepted database event, then presents that result and its evidence.
-
-This is safer, easier to test, and more technically credible than treating an LLM chat context as memory.
-
-## Team division without requiring your friends to know SSH
-
-### You: technical architect and integration owner
-
-You own:
-
-- vLLM/SGLang runtime,
-- Qwen multimodal smoke test,
-- VLM client,
-- event schema,
-- database behavior,
-- motion detection,
-- integration,
-- difficult debugging.
-
-### Friend 1: product experience owner
-
-Their Codex worktree may edit only:
-
-```text
-app/static/**
-```
-
-They guide Codex to build:
-
-- Live page,
-- object cards,
-- visual event timeline,
-- Ask page,
-- Privacy page,
-- loading states,
-- error handling,
-- visual polish.
-
-They can do this by inspecting the application in a browser and telling Codex what to change. No SSH knowledge is necessary.
-
-### Friend 2: evaluation and demo owner
-
-Their Codex worktree owns:
-
-```text
-scripts/run_eval.py
-tests/fixtures/**
-DEMO_SCRIPT.md
-DEVPOST_DRAFT.md
-PITCH_QA.md
-```
-
-They:
-
-- define the 20-trial test matrix,
-- enroll and move objects,
-- record correct/incorrect outcomes,
-- calculate honest metrics,
-- write the pitch,
-- make the backup demo,
-- prepare Devpost content.
-
-This is real work, not fake busywork. It directly supports the judging criteria.
-
-After the initial scaffold commit, Codex can create separate branches and worktrees:
+The intended model commands are:
 
 ```bash
-git worktree add ../localrecall-ui -b feature/ui
-git worktree add ../localrecall-eval -b feature/eval
+./scripts/start_vllm.sh
+./scripts/wait_for_vllm.sh
+python scripts/smoke_text.py
+python scripts/smoke_vision.py
 ```
 
-Open a separate Codex thread in each folder. Your friends interact with those threads and browser results; you handle merging.
+The intended app commands, after implementation, are:
 
-The hackathon guide explicitly says every team member must be able to explain how the project works, so the plan includes two short architecture teach-backs rather than allowing the others to remain disconnected from the implementation. Pasted text
-
-## Execution schedule
-
-The event starts hacking at noon Saturday, the venue closes at 10:00 PM, reopens at 9:00 AM Sunday, and submissions are due at 1:30 PM. Pasted text
-
-### Saturday
-
-**12:00–12:45 — model gate**
-
-- Run hardware preflight.
-- Locate the existing model cache.
-- Start `vllm/vllm-openai:qwen38`.
-- Pass text test.
-- Pass image test.
-- Pass strict JSON change-analysis test.
-
-**12:45–2:15 — manual vertical slice**
-
-By 2:15, this must work:
-
-```text
-Manual BEFORE
--> Manual AFTER
--> Qwen analysis
--> valid event JSON
--> SQLite
--> "Where are my keys?"
--> evidence
+```bash
+python -m app.ui.app --mock --port 7861
+python -m app.ui.app --backend --host 127.0.0.1 --port 7860
 ```
 
-Nothing else is more important.
+On the presenter laptop, forward the app port and browse to localhost:
 
-**2:15–4:00 — camera and automatic detection**
-
-- Camera thread.
-- Motion state machine.
-- Stable-frame selection.
-- Default zones.
-- Fixture-video mode.
-
-**4:00–5:30 — enrollment and UI**
-
-- Three object references.
-- Zone editor.
-- Live state indicators.
-- Memory timeline.
-- Ask interface.
-
-**5:30–7:00 — real trials**
-
-- Move real objects.
-- Tune thresholds.
-- Improve the event prompt.
-- Add review behavior.
-- Measure actual latency.
-
-**7:00–8:30 — evaluation and offline proof**
-
-- Run trial matrix.
-- Restart in offline mode.
-- Verify continuous-video storage is zero.
-- Finish privacy page.
-- Draft Devpost.
-
-**8:30–9:20 — demo hardening**
-
-- Record backup demo.
-- Rehearse.
-- Take screenshots.
-- Stop adding features.
-
-**9:20–9:45 — freeze**
-
-- Tag known-good commit.
-- Export source and assets.
-- Back up database and video.
-- Leave with something bootable.
-
-### Sunday
-
-**9:00–10:00**
-
-- Cold-boot test.
-- Start model from script.
-- Start application.
-- Run full demo.
-
-**10:00–11:30**
-
-- Finish measured evaluation.
-- Finalize pitch and Q&A.
-
-**11:30–12:30**
-
-- Complete Devpost.
-- Upload screenshots and backup video.
-- Verify repository setup instructions.
-
-**12:30–1:00**
-
-- Freeze submission.
-- Table setup.
-- Full-team rehearsal.
-
-Do not plan to submit at 1:29 PM.
-
-## What to give Codex first
-
-Place the three downloaded Markdown files in the repository root. Then open the primary Codex agent in that repository and paste the contents of:
-
-:chatgpt-content-reference{index="11"}[LocalRecall_Codex_Master_Prompt.md](sandbox:/mnt/data/LocalRecall_Codex_Master_Prompt.md)
-
-Do not launch the teammate worktrees immediately. Let the primary agent complete:
-
-```text
-environment preflight
-model text smoke test
-model vision smoke test
-manual end-to-end MVP
-initial commit and manual-mvp tag
+```bash
+ssh -N -L 7860:127.0.0.1:7860 <spark-user>@<spark-lan-ip>
 ```
 
-Only after that should you create the UI and evaluation worktrees and give your friends their prompts.
+Then open `http://127.0.0.1:7860` on that laptop and allow camera access if using webcam inputs. File uploads remain the fallback. These are target commands, not a claim that the scripts or app are already available; see [STATUS.md](STATUS.md) for verified progress.
 
-The most important rule is:
+## Current implementation status
 
-> **Do not let Codex spend the afternoon building a beautiful UI before the Qwen image request and manual BEFORE/AFTER pipeline work.**
+The environment preflight is complete and recorded in [STATUS.md](STATUS.md). The manual mock-backed facade, SQLite memory, composite builder, event validation, browser frame ingress, and five-tab Gradio UI are implemented. The mock-mode UI returns HTTP 200 and exposes all five tabs; the automated suite currently passes. The Qwen checkpoint download is active. Docker daemon access is still denied, so the container launch flags remain unverified and no real vLLM, text, or image inference result is claimed.
 
-The plan is intentionally designed so that, even under failure, you still finish with a credible local visual-memory demonstration rather than an ambitious collection of disconnected components.
+## Limitations
+
+The intended MVP is a fixed, bounded workspace with enrolled objects and named zones. It is not general room surveillance or unconstrained object tracking. Occlusion, ambiguous identities, changed camera placement, lighting, and mirrored webcam images can reduce reliability. Low-confidence and invalid model outputs must not silently mutate object state. Manual BEFORE/AFTER analysis remains a first-class fallback if streaming is unavailable or unreliable.

@@ -1,0 +1,5 @@
+Answer only from the supplied LocalRecall records. Cite event IDs for factual claims. If the records do not
+support an answer, say that no reliable observation is available. Never infer an unseen location.
+
+Question: {{QUESTION}}
+Records: {{RECORDS}}

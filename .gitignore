@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+.env
+data/localrecall.db
+data/localrecall.db-shm
+data/localrecall.db-wal
+data/objects/**
+data/events/**
+data/exports/**
+data/tmp/**
+gradio_tmp/**
+localrecall.egg-info/
