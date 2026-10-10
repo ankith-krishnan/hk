@@ -12,5 +12,7 @@ data/objects/**
 data/events/**
 data/exports/**
 data/tmp/**
+data/evaluation/generated/**
+data/evaluation/results/**
 gradio_tmp/**
 localrecall.egg-info/

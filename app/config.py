@@ -11,10 +11,16 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 def is_loopback_url(value: str) -> bool:
-    parsed = urlsplit(value)
+    try:
+        parsed = urlsplit(value)
+        hostname = parsed.hostname
+    except ValueError:
+        return False
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         return False
-    hostname = parsed.hostname.lower()
+    if parsed.username is not None or parsed.password is not None or parsed.query or parsed.fragment:
+        return False
+    hostname = hostname.lower()
     if hostname == "localhost":
         return True
     try:

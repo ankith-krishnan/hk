@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 import time
 from pathlib import Path
 from typing import Protocol
@@ -46,6 +47,9 @@ def render_event_prompt(context: EventContext) -> str:
 
 
 class OpenAICompatibleVLMClient:
+    _citation_pattern = re.compile(r"#(\d+)\b")
+    _unsupported_answer = "No reliable observation is available in the saved events."
+
     def __init__(self, settings: Settings):
         if settings.offline_mode and not is_loopback_url(settings.vlm_base_url):
             raise ValueError("Offline model access must use a loopback URL")
@@ -120,6 +124,20 @@ class OpenAICompatibleVLMClient:
         return self._post(payload)
 
     def answer_from_records(self, question: str, records: list[dict]) -> str:
+        allowed_event_ids: set[int] = set()
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            raw_id = record.get("id")
+            if (
+                isinstance(raw_id, (int, str))
+                and not isinstance(raw_id, bool)
+                and str(raw_id).isdigit()
+            ):
+                allowed_event_ids.add(int(raw_id))
+        if not allowed_event_ids:
+            return self._unsupported_answer
+
         prompt = _read_prompt("query_answer.txt").replace("{{QUESTION}}", question).replace(
             "{{RECORDS}}", json.dumps(records, ensure_ascii=False)[:12000]
         )
@@ -130,6 +148,9 @@ class OpenAICompatibleVLMClient:
             "max_tokens": 256,
         }
         content, _, _ = self._post(payload)
+        cited_ids = {int(match) for match in self._citation_pattern.findall(content)}
+        if not cited_ids or not cited_ids.issubset(allowed_event_ids):
+            return self._unsupported_answer
         return content
 
 

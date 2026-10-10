@@ -30,57 +30,105 @@ def create_app(facade, *, temp_allowed_path: str | None = None) -> gr.Blocks:
     if temp_allowed_path:
         allowed_paths.append(temp_allowed_path)
     css = """
-    .gradio-container { max-width: 1240px !important; }
-    .lr-header { padding: 1.25rem 1.5rem; border-radius: 16px; background: #f1f5f9; }
-    .lr-note { color: #475569; font-size: 0.95rem; }
+    .gradio-container { max-width: 1320px !important; padding: 1.25rem !important; }
+    .lr-header {
+        padding: 1.5rem 1.75rem;
+        border: 1px solid #dbe5f0;
+        border-radius: 20px;
+        background: linear-gradient(115deg, #f5f8ff 0%, #f2fbfa 100%);
+        box-shadow: 0 8px 28px rgba(30, 64, 110, 0.06);
+    }
+    .lr-eyebrow {
+        color: #46617e;
+        font-size: 0.76rem;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+    }
+    .lr-note { color: #526277; font-size: 0.96rem; line-height: 1.55; }
+    .lr-section {
+        margin: 0.25rem 0 0.75rem;
+        padding: 0.25rem 0;
+    }
+    @media (max-width: 700px) {
+        .gradio-container { padding: 0.65rem !important; }
+        .lr-header { padding: 1rem; border-radius: 14px; }
+    }
     """
-    with gr.Blocks(title="LocalRecall", css=css, theme=gr.themes.Soft()) as demo:
+    with gr.Blocks(
+        title="LocalRecall",
+        css=css,
+        theme=gr.themes.Soft(primary_hue="indigo", secondary_hue="teal", neutral_hue="slate"),
+    ) as demo:
         source_id = gr.State(value="")
         gr.Markdown(
-            "# LocalRecall\n**Private visual memory for a bounded workspace.** "
-            "Images are analyzed by the local backend and event facts live in SQLite.",
+            "<div class='lr-eyebrow'>Local workspace memory</div>\n"
+            "# LocalRecall\n"
+            "Remember where things were last seen. Add a workspace, compare two moments, "
+            "and ask questions backed by saved event evidence.\n\n"
+            "**SET UP** → **CAPTURE** → **REVIEW** → **ASK**",
             elem_classes=["lr-header"],
         )
         status_line = gr.Markdown()
 
         with gr.Tabs():
             with gr.Tab("Watch"):
+                gr.Markdown("## Remember a change", elem_classes=["lr-section"])
                 gr.Markdown(
-                    "Use two snapshots or uploads for the dependable manual path. "
-                    "The optional browser stream sends frames to the GB10 over your local connection. "
-                    "Automatic event detection is not enabled yet; this stream currently reports ingress health only.",
+                    "Add an earlier image on the left and a later image on the right. "
+                    "Upload files or take browser-camera snapshots; you do not need a live stream.",
                     elem_classes=["lr-note"],
                 )
                 with gr.Row():
-                    browser_camera = gr.Image(
-                        label="Laptop Camera · optional live stream",
-                        sources=["webcam"],
-                        type="numpy",
-                        streaming=True,
-                    )
-                    with gr.Column():
-                        ingest_status = gr.Markdown("Camera disconnected. Upload pairs below any time.")
-                        with gr.Row():
-                            watch_start = gr.Button("Start Watch", variant="secondary")
-                            watch_stop = gr.Button("Stop Watch")
-                gr.Markdown("## Manual Remember · BEFORE / AFTER")
-                with gr.Row():
                     before = gr.Image(
-                        label="BEFORE · webcam snapshot or image upload",
+                        label="1 · BEFORE — earlier moment",
                         sources=["webcam", "upload"],
                         type="numpy",
                     )
                     after = gr.Image(
-                        label="AFTER · webcam snapshot or image upload",
+                        label="2 · AFTER — later moment",
                         sources=["webcam", "upload"],
                         type="numpy",
                     )
-                analyze_button = gr.Button("Analyze Change", variant="primary")
-                event_summary = gr.Markdown("Add both images, then analyze the change.")
-                event_details = gr.JSON(label="Event details")
-                event_evidence = gr.Gallery(label="BEFORE / AFTER evidence", columns=3, height=260)
+                analyze_button = gr.Button("Analyze these images", variant="primary", size="lg")
+                with gr.Group():
+                    gr.Markdown("### Result and evidence")
+                    event_summary = gr.Markdown("Your result will appear here after both images are analyzed.")
+                    event_evidence = gr.Gallery(label="Images supporting this result", columns=3, height=260)
+                    with gr.Accordion("Structured event details", open=False):
+                        event_details = gr.JSON(label="Validated event record")
+
+                with gr.Accordion("Optional browser camera stream · frame status only", open=False):
+                    gr.Markdown(
+                        "This optional stream sends laptop-browser frames to the local app and reports "
+                        "whether frames arrive. Automatic movement analysis is not enabled in this build. "
+                        "Use the two image boxes above to ask Qwen to analyze a change.",
+                        elem_classes=["lr-note"],
+                    )
+                    with gr.Row():
+                        browser_camera = gr.Image(
+                            label="Laptop camera preview",
+                            sources=["webcam"],
+                            type="numpy",
+                            streaming=True,
+                        )
+                        with gr.Column():
+                            ingest_status = gr.Markdown(
+                                "Camera disconnected. Manual image analysis is available above."
+                            )
+                            gr.Markdown(
+                                "Use the camera preview’s own controls to start or stop the stream. "
+                                "This build reports frame arrival only; it does not detect or analyze movement.",
+                                elem_classes=["lr-note"],
+                            )
 
             with gr.Tab("Memory"):
+                gr.Markdown("## Saved workspace memory")
+                gr.Markdown(
+                    "Current locations come from accepted events. Pending events wait for your decision "
+                    "and do not change an object’s saved location.",
+                    elem_classes=["lr-note"],
+                )
                 with gr.Row():
                     object_table = gr.Dataframe(
                         headers=["Object", "ID", "Current location", "Last event"],
@@ -97,18 +145,40 @@ def create_app(facade, *, temp_allowed_path: str | None = None) -> gr.Blocks:
                     label="Events awaiting review",
                     interactive=False,
                 )
+                gr.Markdown("### Review an event")
                 with gr.Row():
                     review_id = gr.Number(label="Event ID to review", precision=0)
                     approve = gr.Button("Approve event")
                     reject = gr.Button("Reject event")
                 review_result = gr.Markdown()
+                gr.Markdown(
+                    "### Correct an event from visible evidence\n"
+                    "Use the event ID from the review list. Corrections are applied to the saved event.",
+                    elem_classes=["lr-note"],
+                )
+                with gr.Row():
+                    correction_type = gr.Dropdown(
+                        choices=["move", "appear", "disappear", "no_change"],
+                        value="move",
+                        label="Correct event type",
+                    )
+                    correction_object = gr.Textbox(label="Object ID", placeholder="keys")
+                    correction_from = gr.Textbox(label="From zone ID", placeholder="left_tray")
+                    correction_to = gr.Textbox(label="To zone ID", placeholder="right_tray")
+                    correction_button = gr.Button("Apply correction")
+                correction_result = gr.Markdown()
                 memory_gallery = gr.Gallery(label="Saved event evidence", columns=4, height=300)
 
             with gr.Tab("Ask"):
+                gr.Markdown("## Ask about saved observations")
+                gr.Markdown(
+                    "Try **Where are my keys?** Answers use saved events and show the supporting evidence when available.",
+                    elem_classes=["lr-note"],
+                )
                 question = gr.Textbox(
                     label="Ask about your workspace",
                     placeholder="Where are my keys?",
-                    lines=2,
+                    lines=1,
                 )
                 with gr.Row():
                     ask_button = gr.Button("Ask LocalRecall", variant="primary")
@@ -120,7 +190,15 @@ def create_app(facade, *, temp_allowed_path: str | None = None) -> gr.Blocks:
                 ask_evidence = gr.Gallery(label="Answer evidence", columns=3, height=260)
 
             with gr.Tab("Setup"):
-                gr.Markdown("Enroll a few recognizable objects and keep zones aligned with the camera view.")
+                gr.Markdown("## Prepare your workspace")
+                gr.Markdown(
+                    "First load or define the zones visible in your camera view. Then enroll each object "
+                    "with a clear reference photo and a name you will use in questions.",
+                    elem_classes=["lr-note"],
+                )
+                zones_button = gr.Button("Load three demo zones", variant="primary")
+                zone_result = gr.Markdown("No zones loaded yet.")
+                gr.Markdown("### Enroll an object")
                 with gr.Row():
                     object_name = gr.Textbox(label="Object name", placeholder="Keys")
                     object_aliases = gr.Textbox(label="Aliases, separated by commas", placeholder="car keys, key ring")
@@ -129,10 +207,8 @@ def create_app(facade, *, temp_allowed_path: str | None = None) -> gr.Blocks:
                     sources=["webcam", "upload"],
                     type="numpy",
                 )
-                enroll_button = gr.Button("Enroll object")
+                enroll_button = gr.Button("Save object reference", variant="primary")
                 setup_result = gr.Markdown()
-                zones_button = gr.Button("Load three demo zones", variant="secondary")
-                zone_result = gr.Markdown()
                 gr.Markdown("### Add a rectangular zone")
                 with gr.Row():
                     zone_name = gr.Textbox(label="Zone name", placeholder="Shelf")
@@ -143,13 +219,21 @@ def create_app(facade, *, temp_allowed_path: str | None = None) -> gr.Blocks:
                     x2 = gr.Number(label="x2", value=1.0, minimum=0, maximum=1)
                     y2 = gr.Number(label="y2", value=1.0, minimum=0, maximum=1)
                 zone_save = gr.Button("Save zone")
+                with gr.Row():
+                    delete_object_id = gr.Textbox(label="Object ID to remove")
+                    delete_object_button = gr.Button("Remove object reference")
+                with gr.Row():
+                    delete_zone_id = gr.Textbox(label="Zone ID to disable")
+                    delete_zone_button = gr.Button("Disable zone")
 
             with gr.Tab("System & Privacy"):
+                gr.Markdown("## System health and data handling")
                 system_status = gr.Markdown()
                 gr.Markdown(
-                    "Frames arrive from this browser over the local laptop-to-GB10 connection. "
-                    "The app retains event images and object references, not continuous video. "
-                    "Gradio may create temporary upload/cache files; those live in the configured local temp directory.",
+                    "Camera frames travel from this browser to the local backend over your laptop-to-GB10 connection. "
+                    "The app retains enrolled object references and selected event evidence; it does not write a "
+                    "continuous video. Gradio may create temporary upload/cache files in the configured local "
+                    "folder, which the app manages and cleans up.",
                     elem_classes=["lr-note"],
                 )
                 with gr.Row():
@@ -195,6 +279,26 @@ def create_app(facade, *, temp_allowed_path: str | None = None) -> gr.Blocks:
             except Exception as exc:
                 raise gr.Error(str(exc)) from exc
 
+        def wrapped_correction(event_id, event_type, object_id, from_zone_id, to_zone_id):
+            try:
+                return callbacks.correct_event(
+                    facade, event_id, event_type, object_id or "", from_zone_id or "", to_zone_id or ""
+                )
+            except Exception as exc:
+                raise gr.Error(str(exc)) from exc
+
+        def wrapped_delete_object(object_id):
+            try:
+                return callbacks.delete_object(facade, object_id or "")
+            except Exception as exc:
+                raise gr.Error(str(exc)) from exc
+
+        def wrapped_delete_zone(zone_id):
+            try:
+                return callbacks.delete_zone(facade, zone_id or "")
+            except Exception as exc:
+                raise gr.Error(str(exc)) from exc
+
         def refresh_all():
             try:
                 status, objects, gallery, pending = callbacks.refresh(facade)
@@ -206,13 +310,6 @@ def create_app(facade, *, temp_allowed_path: str | None = None) -> gr.Blocks:
             except Exception as exc:  # noqa: BLE001 - status polling must show unexpected backend errors
                 message = f"Status unavailable: {exc}"
                 return message, message, [], [], [], []
-
-        def wrapped_watch(method):
-            try:
-                status = method(facade)
-                return status
-            except Exception as exc:
-                raise gr.Error(str(exc)) from exc
 
         def save_zone(name, slug, left, top, right, bottom):
             try:
@@ -265,10 +362,16 @@ def create_app(facade, *, temp_allowed_path: str | None = None) -> gr.Blocks:
             time_limit=60,
             queue=False,
         )
-        watch_start.click(lambda: wrapped_watch(callbacks.start_watch)(), outputs=[status_line], queue=True)
-        watch_stop.click(lambda: wrapped_watch(callbacks.stop_watch)(), outputs=[status_line], queue=True)
         approve.click(lambda event_id: wrapped_review(event_id, "approve"), inputs=[review_id], outputs=[review_result], queue=True)
         reject.click(lambda event_id: wrapped_review(event_id, "reject"), inputs=[review_id], outputs=[review_result], queue=True)
+        correction_button.click(
+            wrapped_correction,
+            inputs=[review_id, correction_type, correction_object, correction_from, correction_to],
+            outputs=[correction_result],
+            queue=True,
+        )
+        delete_object_button.click(wrapped_delete_object, inputs=[delete_object_id], outputs=[setup_result], queue=True)
+        delete_zone_button.click(wrapped_delete_zone, inputs=[delete_zone_id], outputs=[zone_result], queue=True)
         export_button.click(wrapped_export, outputs=[export_file], queue=True)
         delete_button.click(wrapped_delete, inputs=[delete_confirm], outputs=[delete_result], queue=True)
 

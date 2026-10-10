@@ -28,6 +28,9 @@ def test_manual_pair_mock_pipeline_persists_event_and_ask_evidence(tmp_path):
     last_move = facade.ask("When were the keys last moved?")
     assert last_move.event_ids == [event.id]
     assert "last moved at" in last_move.answer
+    corrected = facade.correct_event(event.id, "move", "keys", "right_tray", "left_tray")
+    assert corrected.user_corrected and corrected.accepted
+    assert facade.store.get_object_state("keys").zone_id == "left_tray"
     facade.delete_all_memory()
     assert facade.get_events() == []
     assert facade.get_objects() == []

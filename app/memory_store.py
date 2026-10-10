@@ -151,11 +151,17 @@ class MemoryStore:
             for row in rows
         ]
 
-    def delete_object(self, object_id: str) -> None:
+    def delete_object(self, object_id: str) -> str | None:
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT reference_image_path FROM objects WHERE id=?", (object_id,)).fetchone()
+            if row is None:
+                db.rollback()
+                raise KeyError(f"object {object_id} not found")
             db.execute("UPDATE objects SET active=0 WHERE id=?", (object_id,))
+            db.execute("DELETE FROM object_state WHERE object_id=?", (object_id,))
             db.commit()
+        return row["reference_image_path"]
 
     def add_zone(self, record: ZoneRecord) -> ZoneRecord:
         with self.connect() as db:

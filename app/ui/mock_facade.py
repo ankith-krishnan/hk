@@ -174,6 +174,12 @@ class MockFacade:
         return record
 
     def load_demo_zones(self):
+        from app.facade import DEFAULT_ZONES
+
+        current = {zone.id for zone in self.zones}
+        for zone in DEFAULT_ZONES:
+            if zone.id not in current:
+                self.zones.append(zone)
         return list(self.zones)
 
     def add_zone(self, display_name, zone_id, x1, y1, x2, y2):
@@ -185,11 +191,36 @@ class MockFacade:
         self.zones.append(record)
         return record
 
+    def delete_object(self, object_id: str):
+        self.objects = [obj for obj in self.objects if obj.id != object_id]
+        if not self.objects:
+            self._state_zone = ""
+
+    def delete_zone(self, zone_id: str):
+        self.zones = [zone for zone in self.zones if zone.id != zone_id]
+
     def approve_event(self, event_id: int):
         return self._set_decision(event_id, True)
 
     def reject_event(self, event_id: int):
         return self._set_decision(event_id, False)
+
+    def correct_event(self, event_id, event_type, object_id, from_zone_id, to_zone_id):
+        for index, event in enumerate(self.events):
+            if event.id == event_id:
+                changed = event.model_copy(
+                    update={
+                        "event_type": event_type,
+                        "object_id": object_id,
+                        "from_zone_id": from_zone_id,
+                        "to_zone_id": to_zone_id,
+                        "accepted": True,
+                        "user_corrected": True,
+                    }
+                )
+                self.events[index] = changed
+                return changed
+        raise KeyError(event_id)
 
     def _set_decision(self, event_id: int, accepted: bool):
         for index, event in enumerate(self.events):

@@ -1,43 +1,53 @@
 #!/usr/bin/env bash
 set -euo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/docker_access.sh"
 
 image="${VLLM_IMAGE:-vllm/vllm-openai:qwen38}"
 container_name="${VLLM_CONTAINER_NAME:-localrecall-vllm}"
 model="${VLLM_MODEL:-nvidia/Qwen3.8-27B-NVFP4}"
-cache_dir="${HF_HUB_CACHE:-$HOME/.cache/huggingface/hub}"
+model_volume="${VLLM_MODEL_VOLUME:-localrecall-qwen38-cache}"
 ready_timeout="${VLLM_READY_TIMEOUT_SECONDS:-900}"
 
 die() { printf 'start_vllm: %s\n' "$*" >&2; exit 1; }
 
-docker info >/dev/null 2>&1 || die 'Docker daemon is not accessible to this user.'
-[[ -d "$cache_dir" ]] || die "Hugging Face cache directory does not exist: $cache_dir"
+docker_cmd info >/dev/null 2>&1 || die 'Docker daemon is not accessible to this user.'
+if ! docker_cmd image inspect "$image" >/dev/null 2>&1; then
+    printf 'Pulling vLLM image %s\n' "$image"
+    docker_cmd pull "$image"
+fi
 
-model_snapshot="$(find "$cache_dir/models--nvidia--Qwen3.8-27B-NVFP4/snapshots" -mindepth 1 -maxdepth 1 -type d -print -quit 2>/dev/null || true)"
-[[ -n "$model_snapshot" ]] || die "Model $model was not found in $cache_dir; complete the HF download first."
-[[ -f "$model_snapshot/config.json" && -f "$model_snapshot/model.safetensors.index.json" ]] || \
-    die "Model snapshot is incomplete: expected config.json and model.safetensors.index.json in $model_snapshot"
-python3 - "$model_snapshot" <<'PY' || die 'Model snapshot is missing one or more weight shards.'
+printf 'Image entrypoint and default command:\n'
+docker_cmd image inspect --format 'Entrypoint={{json .Config.Entrypoint}} Cmd={{json .Config.Cmd}}' "$image"
+
+docker_cmd volume create "$model_volume" >/dev/null
+printf 'Ensuring model %s exists in Docker volume %s (first run downloads the checkpoint).\n' "$model" "$model_volume"
+docker_cmd run --rm -i \
+    --volume "$model_volume:/root/.cache/huggingface/hub" \
+    --entrypoint python3 \
+    "$image" - "$model" <<'PY' || die 'Could not download or validate the model in the Docker volume.'
 import json
 import pathlib
 import sys
 
-root = pathlib.Path(sys.argv[1])
-index = json.loads((root / "model.safetensors.index.json").read_text())
-files = set(index.get("weight_map", {}).values())
-if not files or any(not (root / filename).is_file() for filename in files):
-    raise SystemExit(1)
+from huggingface_hub import snapshot_download
+
+repo_id = sys.argv[1]
+cache = pathlib.Path("/root/.cache/huggingface/hub")
+snapshot = pathlib.Path(snapshot_download(repo_id=repo_id, cache_dir=str(cache)))
+required = (snapshot / "config.json", snapshot / "model.safetensors.index.json")
+if any(not path.is_file() for path in required):
+    raise SystemExit(f"incomplete model snapshot: {snapshot}")
+index = json.loads(required[1].read_text())
+shards = set(index.get("weight_map", {}).values())
+missing = sorted(name for name in shards if not (snapshot / name).is_file())
+if not shards or missing:
+    raise SystemExit(f"missing model shards: {missing[:8]}")
+print(f"Validated {repo_id} at {snapshot}; {len(shards)} weight shards are present.")
 PY
 
-if ! docker image inspect "$image" >/dev/null 2>&1; then
-    printf 'Pulling vLLM image %s\n' "$image"
-    docker pull "$image"
-fi
-
-printf 'Image entrypoint and default command:\n'
-docker image inspect --format 'Entrypoint={{json .Config.Entrypoint}} Cmd={{json .Config.Cmd}}' "$image"
 help_file="$(mktemp)"
 trap 'rm -f "$help_file"' EXIT
-docker run --rm --entrypoint vllm "$image" serve --help >"$help_file" 2>&1 || {
+docker_cmd run --rm --entrypoint vllm "$image" serve --help >"$help_file" 2>&1 || {
     cat "$help_file" >&2
     die 'Could not inspect `vllm serve --help` in the selected image.'
 }
@@ -59,8 +69,8 @@ for flag in "${required_flags[@]}"; do
 done
 printf 'Validated launch flags against vLLM image help.\n'
 
-if docker container inspect "$container_name" >/dev/null 2>&1; then
-    state="$(docker inspect --format '{{.State.Status}}' "$container_name")"
+if docker_cmd container inspect "$container_name" >/dev/null 2>&1; then
+    state="$(docker_cmd inspect --format '{{.State.Status}}' "$container_name")"
     if [[ "$state" == "running" ]]; then
         printf 'Container %s is already running; checking readiness.\n' "$container_name"
         VLLM_READY_TIMEOUT_SECONDS="$ready_timeout" ./scripts/wait_for_vllm.sh
@@ -69,14 +79,14 @@ if docker container inspect "$container_name" >/dev/null 2>&1; then
     die "Container $container_name already exists in state $state. Inspect it or remove it intentionally before retrying; this script will not discard it."
 fi
 
-docker run --detach \
+docker_cmd run --detach \
     --name "$container_name" \
     --gpus all \
     --ipc host \
     --network host \
     --ulimit memlock=-1 \
     --ulimit stack=67108864 \
-    --volume "$cache_dir:/root/.cache/huggingface/hub:ro" \
+    --volume "$model_volume:/root/.cache/huggingface/hub:ro" \
     --env HF_HUB_OFFLINE=1 \
     --env TRANSFORMERS_OFFLINE=1 \
     --entrypoint vllm \

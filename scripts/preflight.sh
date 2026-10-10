@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -u
+source "$(dirname "${BASH_SOURCE[0]}")/docker_access.sh"
 
 printf '%s\n' '== LocalRecall environment preflight =='
 printf '\n%s\n' '-- OS and architecture --'
@@ -24,10 +25,10 @@ df -h . 2>&1 || true
 printf '\n%s\n' '-- Docker --'
 if command -v docker >/dev/null 2>&1; then
     docker --version
-    if docker info >/dev/null 2>&1; then
+    if docker_cmd info >/dev/null 2>&1; then
         printf '%s\n' 'Docker daemon: accessible'
-        docker info --format 'Server={{.ServerVersion}} Root={{.DockerRootDir}}'
-        docker image ls
+        docker_cmd info --format 'Server={{.ServerVersion}} Root={{.DockerRootDir}}'
+        docker_cmd image ls
     else
         printf '%s\n' 'Docker daemon: unavailable to this user (check socket permissions)'
     fi
@@ -39,11 +40,11 @@ printf '\n%s\n' '-- Network listeners --'
 ss -ltn 2>/dev/null | head -30 || true
 
 printf '\n%s\n' '-- Qwen cache presence --'
-hf_cache="${HF_HOME:-$HOME/.cache/huggingface}/hub"
-if [[ -d "$hf_cache" ]]; then
-    find "$hf_cache" -maxdepth 3 -type d -name '*Qwen3.8-27B-NVFP4*' -print 2>/dev/null || true
+model_volume="${VLLM_MODEL_VOLUME:-localrecall-qwen38-cache}"
+if docker_cmd volume inspect "$model_volume" >/dev/null 2>&1; then
+    printf 'Docker-managed model cache volume exists: %s\n' "$model_volume"
 else
-    printf 'Hugging Face hub cache not found: %s\n' "$hf_cache"
+    printf 'Docker-managed model cache volume not created yet: %s\n' "$model_volume"
 fi
 
 printf '\n%s\n' 'Headless camera note: the Spark is not expected to have a webcam. Browser frames come from the presenter laptop.'

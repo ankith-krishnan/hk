@@ -101,7 +101,7 @@ class PrivacyJanitor:
         *,
         retention_seconds: float = 24 * 60 * 60,
         max_bytes: int = 2 * 1024 * 1024 * 1024,
-        interval_seconds: float = 600,
+        interval_seconds: float = 30,
     ):
         self.directory = Path(directory)
         self.retention_seconds = retention_seconds

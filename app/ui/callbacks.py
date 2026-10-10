@@ -32,7 +32,10 @@ def ask(facade: LocalRecallFacade, question: str):
 
 def load_zones(facade: LocalRecallFacade):
     zones = facade.load_demo_zones()
-    return f"Loaded {len(zones)} demo zones: " + ", ".join(zone.display_name for zone in zones)
+    if not zones:
+        return "No demo zones are available. Check backend or mock fixture setup."
+    names = ", ".join(zone.display_name for zone in zones)
+    return f"**{len(zones)} demo zone(s) ready:** {names}."
 
 
 def enroll_object(facade: LocalRecallFacade, name: str, aliases: str, image: np.ndarray | None):
@@ -85,6 +88,33 @@ def decide_event(facade: LocalRecallFacade, event_id: float | None, decision: st
     event_id = int(event_id)
     event = facade.approve_event(event_id) if decision == "approve" else facade.reject_event(event_id)
     return event_markdown(event)
+
+
+def correct_event(facade, event_id, event_type, object_id, from_zone_id, to_zone_id):
+    if event_id is None:
+        raise ValueError("Select an event ID first.")
+    event = facade.correct_event(
+        int(event_id),
+        event_type,
+        object_id.strip() or None,
+        from_zone_id.strip() or None,
+        to_zone_id.strip() or None,
+    )
+    return event_markdown(event)
+
+
+def delete_object(facade, object_id):
+    if not object_id.strip():
+        raise ValueError("Enter the object ID to delete.")
+    facade.delete_object(object_id.strip())
+    return f"Deleted object reference `{object_id.strip()}`. Historical events remain in the timeline."
+
+
+def delete_zone(facade, zone_id):
+    if not zone_id.strip():
+        raise ValueError("Enter the zone ID to delete.")
+    facade.delete_zone(zone_id.strip())
+    return f"Disabled zone `{zone_id.strip()}`. Historical event evidence remains available."
 
 
 def start_watch(facade: LocalRecallFacade):

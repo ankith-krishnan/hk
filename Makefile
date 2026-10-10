@@ -1,4 +1,4 @@
-.PHONY: preflight setup model-start model-smoke run test eval demo-bundle stop
+.PHONY: preflight setup model-start model-smoke run test lint eval demo-bundle offline-check stop
 
 preflight:
 	./scripts/preflight.sh
@@ -21,11 +21,18 @@ run:
 test:
 	.venv/bin/python -m pytest
 
+lint:
+	.venv/bin/ruff check app scripts tests
+
 eval:
+	.venv/bin/python scripts/make_fixture_video.py --output-dir data/evaluation/generated --manifest tests/fixtures/trial_manifest.jsonl
 	.venv/bin/python scripts/run_eval.py --mock
 
 demo-bundle:
 	./scripts/export_demo_bundle.sh
+
+offline-check:
+	./scripts/check_offline.sh
 
 stop:
 	./scripts/stop_vllm.sh

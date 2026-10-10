@@ -30,6 +30,7 @@ from app.schemas import (
     ObjectRecord,
     QueryResult,
     SystemStatus,
+    VLMEventResult,
     ZoneRecord,
 )
 from app.vlm_client import MockVLMClient, OpenAICompatibleVLMClient, VLMClient
@@ -250,6 +251,16 @@ class LocalRecallFacadeImpl:
     def get_current_state(self) -> list[dict]:
         return self.store.get_state_rows()
 
+    def delete_object(self, object_id: str) -> None:
+        reference_path = self.store.delete_object(object_id)
+        if reference_path:
+            Path(reference_path).unlink(missing_ok=True)
+
+    def delete_zone(self, zone_id: str) -> None:
+        if zone_id == "outside_view":
+            raise ValueError("outside_view is reserved for system events.")
+        self.store.delete_zone(zone_id)
+
     def start_watch(self) -> SystemStatus:
         raise RuntimeError(
             "Automatic motion analysis is not enabled yet. The browser stream is ingress-only; use the manual image-pair flow."
@@ -337,6 +348,37 @@ class LocalRecallFacadeImpl:
 
     def reject_event(self, event_id: int) -> EventRecord:
         return self.store.set_event_decision(event_id, False)
+
+    def correct_event(
+        self,
+        event_id: int,
+        event_type: str,
+        object_id: str | None,
+        from_zone_id: str | None,
+        to_zone_id: str | None,
+    ) -> EventRecord:
+        existing = self.store.get_event(event_id)
+        if event_type not in {"move", "appear", "disappear", "no_change"}:
+            raise ValueError("Choose move, appear, disappear, or no_change for an accepted correction.")
+        candidate = VLMEventResult(
+            event_type=event_type,
+            object_id=object_id,
+            from_zone_id=from_zone_id,
+            to_zone_id=to_zone_id,
+            confidence=existing.confidence,
+            visible_evidence=existing.visible_evidence,
+            uncertainty_reason=None,
+        )
+        from app.event_analyzer import validate_event
+
+        validate_event(candidate.model_dump(), EventContext(objects=self.get_objects(), zones=self.get_zones()))
+        return self.store.correct_event(
+            event_id,
+            event_type=event_type,
+            object_id=object_id,
+            from_zone_id=from_zone_id,
+            to_zone_id=to_zone_id,
+        )
 
     def get_health(self) -> dict:
         status = self.get_status()

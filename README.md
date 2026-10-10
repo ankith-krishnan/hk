@@ -4,6 +4,9 @@ LocalRecall is a planned private visual-memory appliance for one bounded tableto
 
 The authoritative implementation requirements are in [LocalRecall_Codex_Master_Prompt.md](LocalRecall_Codex_Master_Prompt.md), [LocalRecall_Implementation_Blueprint.md](LocalRecall_Implementation_Blueprint.md), [LocalRecall_Team_Task_Prompts.md](LocalRecall_Team_Task_Prompts.md), and [HEADLESS_CAMERA_RUNBOOK.md](HEADLESS_CAMERA_RUNBOOK.md). Those documents define the architecture. This README summarizes them and reports implementation state; it does not replace their decisions.
 
+For team handoffs, see the beginner-focused build directions for [Frontend A](FRONTEND_A.md), [Frontend B](FRONTEND_B.md), and the [Backend](BACKEND.md).
+For a two-person, beginner-friendly backend split, see [backend_friendly.md](backend_friendly.md).
+
 ## Product flow
 
 The first acceptance path is manual: provide separate BEFORE and AFTER images in the browser, analyze the pair with a local vision-language model, validate the structured result, store event evidence and accepted state in SQLite, then answer a query from those records. This path must work without a camera or a streaming session.
@@ -43,7 +46,7 @@ The guiding separation is: OpenCV decides when a scene may have changed, the VLM
 
 The target is Ubuntu 24.04 on an NVIDIA GB10-class system, Python 3.11 or 3.12, Docker with NVIDIA Container Toolkit, and the local Qwen checkpoint. The organizer-provided ASUS Ascent GX10 is the judging target; a personal development Spark is not a substitute.
 
-The intended model commands are:
+The model commands are:
 
 ```bash
 ./scripts/start_vllm.sh
@@ -52,7 +55,7 @@ python scripts/smoke_text.py
 python scripts/smoke_vision.py
 ```
 
-The intended app commands, after implementation, are:
+The mock UI and backend commands are:
 
 ```bash
 python -m app.ui.app --mock --port 7861
@@ -65,11 +68,61 @@ On the presenter laptop, forward the app port and browse to localhost:
 ssh -N -L 7860:127.0.0.1:7860 <spark-user>@<spark-lan-ip>
 ```
 
-Then open `http://127.0.0.1:7860` on that laptop and allow camera access if using webcam inputs. File uploads remain the fallback. These are target commands, not a claim that the scripts or app are already available; see [STATUS.md](STATUS.md) for verified progress.
+Then open `http://127.0.0.1:7860` on that laptop and allow camera access if using webcam inputs. File uploads remain the fallback. See [STATUS.md](STATUS.md) for which commands have been verified against the real model and target hardware.
+
+### Local development quick start
+
+```bash
+./scripts/preflight.sh
+make setup
+make test
+python -m app.ui.app --mock --port 7861
+```
+
+Mock mode is isolated from SQLite and vLLM and labels its fixture events as MOCK. The current backend command is:
+
+```bash
+python -m app.ui.app --backend --host 127.0.0.1 --port 7860
+```
+
+The backend supports manual pair analysis and the local VLM client. Automatic motion detection is not enabled yet. Use the manual image-pair path first.
+
+### Model setup
+
+The selected vLLM image is `vllm/vllm-openai:qwen38`. `make model-start` pulls that runtime image, creates the persistent Docker volume `localrecall-qwen38-cache`, downloads the checkpoint from inside the container into that volume on the first run, validates its shards, and mounts the volume read-only in the serving container. The weights remain outside the runtime image, so rebuilding or updating the runtime does not duplicate the checkpoint.
+
+Then use `./scripts/wait_for_vllm.sh` and `make model-smoke`. The launcher inspects the image's vLLM help and verifies the checkpoint inside the Docker volume before serving. Docker daemon access and network access for the first model download are prerequisites; see [STATUS.md](STATUS.md) for their current state. Real Qwen text and image inference must pass before any real-model result is reported.
+
+## Offline operation
+
+The model endpoint defaults to `http://127.0.0.1:8000/v1`; the application rejects non-loopback model endpoints while `OFFLINE_MODE=1`. The container uses Hugging Face and Transformers offline flags after the checkpoint is present. For a WAN-off demonstration, keep the laptop-to-GB10 LAN/SSH connection active and disable only external connectivity. The browser's frames still cross that private local connection.
+
+## Privacy and retention
+
+The live frame source is a bounded RAM ring. Persistent files are object reference images and accepted/reviewable event evidence. Gradio uploads and image outputs can create transient cache files. The app sets `GRADIO_TEMP_DIR` to a dedicated local directory, removes files older than 24 hours, caps it at 2 GiB, and clears it on Delete All Memory and orderly shutdown. The UI reports the last measured transient-cache file and byte counts. These controls do not mean that no transient frame files exist.
+
+## Measured results
+
+- Mock API contract: text and image request scripts received HTTP 200 from a loopback mock server; this verified request formatting and response parsing only.
+- Automated tests: see the exact latest count and command in [STATUS.md](STATUS.md).
+- Real Qwen text latency, image inference, event accuracy, and end-to-end latency: **not measured**.
+- Continuous-video bytes stored: **not measured on a running application**; the current implementation has no continuous-video writer.
+
+`make eval` regenerates a 20-pair synthetic trial set and writes mock-client JSON and Markdown reports under `data/evaluation/results/`. The current deterministic mock always predicts a move for its first object, so these metrics validate the evaluation path and make its limitations visible; they are not real model or product accuracy. `EVALUATION.md` records the exact observed numbers and the real-trial command.
+
+## Troubleshooting
+
+| Symptom | Action |
+|---|---|
+| `docker info` reports permission denied | Run Docker as a user authorized for the Docker socket. The launcher will not change host group membership or permissions. |
+| Model snapshot is incomplete | Finish the Hugging Face download, then rerun `./scripts/start_vllm.sh`; it checks `config.json`, the index, and every referenced weight shard. |
+| Text works but image smoke test fails | Keep the app on manual image-pair mode; inspect container logs and image request support before using the VLM for application events. The authoritative plan allows trying the Spark-compatible SGLang path while preserving the `VLMClient` interface. |
+| Laptop webcam is unavailable | Open the app at `http://127.0.0.1:7860` on the laptop through SSH port forwarding, grant browser permission, or upload two images. The GB10 has no required camera. |
+| Camera stream stops | The browser owns the camera. Reopen the tab or use manual BEFORE/AFTER images; stale frames should leave manual analysis and Ask available. |
 
 ## Current implementation status
 
-The environment preflight is complete and recorded in [STATUS.md](STATUS.md). The manual mock-backed facade, SQLite memory, composite builder, event validation, browser frame ingress, and five-tab Gradio UI are implemented. The mock-mode UI returns HTTP 200 and exposes all five tabs; the automated suite currently passes. The Qwen checkpoint download is active. Docker daemon access is still denied, so the container launch flags remain unverified and no real vLLM, text, or image inference result is claimed.
+The environment preflight is complete and recorded in [STATUS.md](STATUS.md). The manual mock-backed facade, SQLite memory, composite builder, event validation, browser frame ingress, privacy janitor, and five-tab Gradio UI are implemented. The mock-mode UI returns HTTP 200 and exposes all five tabs. The partial Qwen checkpoint was removed from the Hugging Face cache at the user's request. Passwordless `sudo docker` reaches Docker Engine 29.6.2, and the `vllm/vllm-openai:qwen38` image pull is in progress. That image supplies the serving runtime, not Qwen weights; no real model inference result is claimed.
 
 ## Limitations
 
