@@ -13,13 +13,20 @@ from app.schemas import EventRecord, ObjectRecord, QueryResult, SystemStatus, Zo
 
 class MockFacade:
     def __init__(self):
+        self.frames_received = 0
+        self.watch_mode = False
+        self.last_source_time: float | None = None
+        self._temp = Path(tempfile.mkdtemp(prefix="localrecall-mock-"))
+        self._seed_demo_fixtures()
+
+    def _seed_demo_fixtures(self) -> None:
         self.objects = [ObjectRecord(id="keys", display_name="Keys", aliases=["car keys"])]
         self.zones = [
             ZoneRecord(id="left_tray", display_name="Left Tray", polygon=[(0, 0), (0.3, 0), (0.3, 1)]),
             ZoneRecord(id="center_mat", display_name="Center Mat", polygon=[(0.35, 0), (0.65, 0), (0.65, 1)]),
             ZoneRecord(id="right_tray", display_name="Right Tray", polygon=[(0.7, 0), (1, 0), (1, 1)]),
         ]
-        self.events: list[EventRecord] = [
+        self.events = [
             EventRecord(
                 id=1,
                 event_type="move",
@@ -28,7 +35,10 @@ class MockFacade:
                 to_zone_id="right_tray",
                 confidence=0.91,
                 accepted=True,
-                visible_evidence=["MOCK fixture: keys visible in the left tray before.", "MOCK fixture: keys visible in the right tray after."],
+                visible_evidence=[
+                    "MOCK fixture: keys visible in the left tray before.",
+                    "MOCK fixture: keys visible in the right tray after.",
+                ],
                 model_name="MOCK",
                 pre_image_path=None,
                 post_image_path=None,
@@ -47,15 +57,18 @@ class MockFacade:
                 model_name="MOCK",
             ),
         ]
-        self.frames_received = 0
-        self.watch_mode = False
-        self.last_source_time: float | None = None
         self._state_zone = "right_tray"
-        self._temp = Path(tempfile.mkdtemp(prefix="localrecall-mock-"))
         self._before_path, self._after_path = self._make_evidence()
         self.events[0] = self.events[0].model_copy(
             update={"pre_image_path": str(self._before_path), "post_image_path": str(self._after_path)}
         )
+
+    def restore_demo_fixtures(self) -> None:
+        """Reload the default mock zones, Keys object, and sample events after Delete all memory."""
+        self._seed_demo_fixtures()
+        self.frames_received = 0
+        self.watch_mode = False
+        self.last_source_time = None
 
     def _make_evidence(self):
         from PIL import ImageDraw
@@ -156,13 +169,46 @@ class MockFacade:
         self.watch_mode = False
         return self.get_status()
 
+    def _event_evidence_paths(self, event: EventRecord | None) -> list[str]:
+        if event is None:
+            return []
+        return [path for path in (event.pre_image_path, event.post_image_path, event.composite_path) if path]
+
     def ask(self, question: str):
+        import re
+
         lower = question.lower()
+        event_match = re.search(r"\b(?:event|#)\s*#?(\d+)\b", lower)
+        if event_match:
+            event_id = int(event_match.group(1))
+            event = next((item for item in self.events if item.id == event_id), None)
+            if event is None:
+                return QueryResult(answer=f"MOCK: I do not have event #{event_id}.")
+            return QueryResult(
+                answer=(
+                    f"MOCK: Event #{event.id} — {event.event_type} for {event.object_id or 'unknown'}; "
+                    f"{event.from_zone_id or '?'} → {event.to_zone_id or '?'}."
+                ),
+                event_ids=[event.id],
+                evidence_paths=self._event_evidence_paths(event),
+                confidence=event.confidence,
+            )
+        if any(phrase in lower for phrase in ("what moved", "most recently", "most recent")):
+            event = next((item for item in self.events if item.accepted), None)
+            if event is None:
+                return QueryResult(answer="MOCK: no accepted events yet.")
+            return QueryResult(
+                answer=f"MOCK: most recent accepted event was #{event.id} ({event.object_id}).",
+                event_ids=[event.id],
+                evidence_paths=self._event_evidence_paths(event),
+                confidence=event.confidence,
+            )
         if "key" in lower:
             event = next((item for item in self.events if item.accepted), None)
             return QueryResult(
                 answer=f"MOCK: Keys were last observed in {self._state_zone.replace('_', ' ').title()}.",
                 event_ids=[event.id] if event else [],
+                evidence_paths=self._event_evidence_paths(event),
                 confidence=event.confidence if event else None,
             )
         return QueryResult(answer="MOCK: no fixture answer for that question.")
@@ -176,10 +222,9 @@ class MockFacade:
     def load_demo_zones(self):
         from app.facade import DEFAULT_ZONES
 
-        current = {zone.id for zone in self.zones}
-        for zone in DEFAULT_ZONES:
-            if zone.id not in current:
-                self.zones.append(zone)
+        demo_ids = {zone.id for zone in DEFAULT_ZONES}
+        custom = [zone for zone in self.zones if zone.id not in demo_ids]
+        self.zones = list(DEFAULT_ZONES) + custom
         return list(self.zones)
 
     def add_zone(self, display_name, zone_id, x1, y1, x2, y2):
@@ -192,6 +237,8 @@ class MockFacade:
         return record
 
     def delete_object(self, object_id: str):
+        if not any(obj.id == object_id for obj in self.objects):
+            raise KeyError(f"object {object_id} not found")
         self.objects = [obj for obj in self.objects if obj.id != object_id]
         if not self.objects:
             self._state_zone = ""
@@ -206,6 +253,12 @@ class MockFacade:
         return self._set_decision(event_id, False)
 
     def correct_event(self, event_id, event_type, object_id, from_zone_id, to_zone_id):
+        if object_id is not None and object_id not in {obj.id for obj in self.objects}:
+            raise ValueError(f"MOCK: unknown object ID `{object_id}`.")
+        zone_ids = {zone.id for zone in self.zones}
+        for zone_id in (from_zone_id, to_zone_id):
+            if zone_id is not None and zone_id not in zone_ids:
+                raise ValueError(f"MOCK: unknown zone ID `{zone_id}`.")
         for index, event in enumerate(self.events):
             if event.id == event_id:
                 changed = event.model_copy(

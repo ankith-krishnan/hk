@@ -1,10 +1,15 @@
 .PHONY: preflight setup model-start model-smoke run test lint eval demo-bundle offline-check stop
 
+PYTHON ?= $(shell ./scripts/ensure_python.sh 2>/dev/null || true)
+
 preflight:
 	./scripts/preflight.sh
 
 setup:
-	python3 -m venv .venv
+	@chmod +x scripts/ensure_python.sh
+	@PY=$$(./scripts/ensure_python.sh); echo "Using $$PY"; \
+	$$PY -m venv .venv; \
+	.venv/bin/python -m pip install -U pip; \
 	.venv/bin/python -m pip install -e '.[dev]'
 
 model-start:

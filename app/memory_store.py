@@ -179,6 +179,29 @@ class MemoryStore:
             db.commit()
         return record
 
+    def upsert_zone(self, record: ZoneRecord) -> ZoneRecord:
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT id FROM zones WHERE id=?", (record.id,)).fetchone()
+            if row is None:
+                db.execute(
+                    "INSERT INTO zones(id, display_name, polygon_json, active, created_at) VALUES(?, ?, ?, ?, ?)",
+                    (
+                        record.id,
+                        record.display_name,
+                        json.dumps(record.polygon),
+                        1,
+                        now_iso(),
+                    ),
+                )
+            else:
+                db.execute(
+                    "UPDATE zones SET display_name=?, polygon_json=?, active=1 WHERE id=?",
+                    (record.display_name, json.dumps(record.polygon), record.id),
+                )
+            db.commit()
+        return record
+
     def list_zones(self, active_only: bool = True) -> list[ZoneRecord]:
         query = "SELECT * FROM zones" + (" WHERE active=1" if active_only else "") + " ORDER BY id"
         with self.connect() as db:

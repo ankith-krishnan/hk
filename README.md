@@ -72,6 +72,13 @@ Then open `http://127.0.0.1:7860` on that laptop and allow camera access if usin
 
 ### Local development quick start
 
+Requires **Python 3.11 or 3.12**. Conda **base** on macOS is often **3.14**, which cannot install this project’s pinned Gradio/pydantic stack. Use a 3.12 env first:
+
+```bash
+conda create -y -n localrecall python=3.12
+conda activate localrecall
+```
+
 ```bash
 ./scripts/preflight.sh
 make setup

@@ -9,8 +9,12 @@ from app.ui.transforms import event_markdown, query_markdown, status_markdown
 
 
 def analyze_pair(facade: LocalRecallFacade, before: np.ndarray | None, after: np.ndarray | None):
-    if before is None or after is None:
-        raise ValueError("Provide both a BEFORE image and an AFTER image.")
+    if before is None and after is None:
+        raise ValueError("Add a BEFORE image and an AFTER image, then press Analyze.")
+    if before is None:
+        raise ValueError("Add the BEFORE (earlier) image on the left.")
+    if after is None:
+        raise ValueError("Add the AFTER (later) image on the right.")
     event = facade.analyze_pair(before, after)
     gallery = [
         (path, label)
@@ -24,25 +28,90 @@ def analyze_pair(facade: LocalRecallFacade, before: np.ndarray | None, after: np
     return event_markdown(event), event.model_dump(mode="json"), gallery
 
 
+def _query_evidence_gallery(result) -> list[tuple[str, str]]:
+    if not result.evidence_paths:
+        return []
+    if len(result.event_ids) == 1:
+        label = f"Evidence for event #{result.event_ids[0]}"
+        return [(path, label) for path in result.evidence_paths]
+    citation = ", ".join(f"#{event_id}" for event_id in result.event_ids) or "saved events"
+    return [(path, f"Evidence · {citation}") for path in result.evidence_paths]
+
+
 def ask(facade: LocalRecallFacade, question: str):
-    result = facade.ask(question)
-    gallery = [(path, f"Evidence for event #{event_id}") for path in result.evidence_paths for event_id in result.event_ids]
-    return query_markdown(result), gallery
+    text = (question or "").strip()
+    if not text:
+        raise ValueError("Type a question first, for example: Where are my keys?")
+    result = facade.ask(text)
+    return query_markdown(result), _query_evidence_gallery(result)
+
+
+def zones_table_rows(facade: LocalRecallFacade) -> list[list]:
+    return [
+        [zone.id, zone.display_name, "active" if zone.active else "disabled"]
+        for zone in facade.get_zones()
+    ]
 
 
 def load_zones(facade: LocalRecallFacade):
     zones = facade.load_demo_zones()
     if not zones:
-        return "No demo zones are available. Check backend or mock fixture setup."
-    names = ", ".join(zone.display_name for zone in zones)
-    return f"**{len(zones)} demo zone(s) ready:** {names}."
+        return "No demo zones are available. Check backend or mock fixture setup.", []
+    demo_names = [zone.display_name for zone in zones if zone.id in {"left_tray", "center_mat", "right_tray"}]
+    names = ", ".join(demo_names) if demo_names else ", ".join(zone.display_name for zone in zones)
+    message = (
+        f"**Loaded 3 workspace regions:** {names}.\n\n"
+        "Check the **Loaded regions** table below — you should see `left_tray`, `center_mat`, and `right_tray`. "
+        "Regions are not listed on the **Memory** tab (that tab is for **events** only)."
+    )
+    return message, zones_table_rows(facade)
 
 
 def enroll_object(facade: LocalRecallFacade, name: str, aliases: str, image: np.ndarray | None):
+    display_name = (name or "").strip()
+    if not display_name:
+        raise ValueError("Enter an object name (for example: Keys).")
     if image is None:
         raise ValueError("Choose a reference image for the object.")
-    record = facade.enroll_object(name, aliases, image)
+    record = facade.enroll_object(display_name, (aliases or "").strip(), image)
     return f"Enrolled **{record.display_name}** as `{record.id}`."
+
+
+def save_zone_message(record) -> str:
+    return f"Saved zone **{record.display_name}** (`{record.id}`)."
+
+
+def add_zone(
+    facade: LocalRecallFacade,
+    display_name: str,
+    zone_id: str,
+    x1: float,
+    y1: float,
+    x2: float,
+    y2: float,
+):
+    name = (display_name or "").strip()
+    slug = (zone_id or "").strip()
+    if not name:
+        raise ValueError("Enter a zone name (for example: Shelf).")
+    if not slug:
+        raise ValueError("Enter a zone ID (for example: shelf).")
+    if x2 <= x1 or y2 <= y1:
+        raise ValueError("Zone corners must form a rectangle: x2 > x1 and y2 > y1.")
+    return facade.add_zone(name, slug, float(x1), float(y1), float(x2), float(y2))
+
+
+def save_zone(
+    facade: LocalRecallFacade,
+    display_name: str,
+    zone_id: str,
+    x1: float,
+    y1: float,
+    x2: float,
+    y2: float,
+) -> str:
+    record = add_zone(facade, display_name, zone_id, x1, y1, x2, y2)
+    return save_zone_message(record)
 
 
 def ingest_browser_frame(facade: LocalRecallFacade, frame: np.ndarray | None, source_id: str):
@@ -82,32 +151,45 @@ def refresh(facade: LocalRecallFacade):
     return status_markdown(status), rows, gallery, pending
 
 
+def _event_id(event_id: float | None) -> int:
+    if event_id is None or int(event_id) < 1:
+        raise ValueError("Enter an event ID from the timeline or review list (for example: 2).")
+    return int(event_id)
+
+
 def decide_event(facade: LocalRecallFacade, event_id: float | None, decision: str):
-    if event_id is None:
-        raise ValueError("Select an event ID first.")
-    event_id = int(event_id)
-    event = facade.approve_event(event_id) if decision == "approve" else facade.reject_event(event_id)
+    event_id = _event_id(event_id)
+    try:
+        event = facade.approve_event(event_id) if decision == "approve" else facade.reject_event(event_id)
+    except KeyError:
+        raise ValueError(f"No event #{event_id} exists. Pick an ID from the timeline or review list.") from None
     return event_markdown(event)
 
 
 def correct_event(facade, event_id, event_type, object_id, from_zone_id, to_zone_id):
-    if event_id is None:
-        raise ValueError("Select an event ID first.")
-    event = facade.correct_event(
-        int(event_id),
-        event_type,
-        object_id.strip() or None,
-        from_zone_id.strip() or None,
-        to_zone_id.strip() or None,
-    )
+    event_id = _event_id(event_id)
+    try:
+        event = facade.correct_event(
+            event_id,
+            event_type,
+            object_id.strip() or None,
+            from_zone_id.strip() or None,
+            to_zone_id.strip() or None,
+        )
+    except KeyError:
+        raise ValueError(f"No event #{event_id} exists. Pick an ID from the timeline or review list.") from None
     return event_markdown(event)
 
 
 def delete_object(facade, object_id):
-    if not object_id.strip():
+    object_id = object_id.strip()
+    if not object_id:
         raise ValueError("Enter the object ID to delete.")
-    facade.delete_object(object_id.strip())
-    return f"Deleted object reference `{object_id.strip()}`. Historical events remain in the timeline."
+    try:
+        facade.delete_object(object_id)
+    except KeyError:
+        raise ValueError(f"No enrolled object has ID `{object_id}`. Check the Memory tab's ID column.") from None
+    return f"Deleted object reference `{object_id}`. Historical events remain in the timeline."
 
 
 def delete_zone(facade, zone_id):
@@ -126,7 +208,8 @@ def stop_watch(facade: LocalRecallFacade):
 
 
 def export_session(facade: LocalRecallFacade):
-    return str(facade.export_session())
+    path = facade.export_session()
+    return str(path)
 
 
 def delete_all_memory(facade: LocalRecallFacade, confirmed: bool):
@@ -134,4 +217,15 @@ def delete_all_memory(facade: LocalRecallFacade, confirmed: bool):
         raise ValueError("Check the confirmation box before deleting all memory.")
     facade.delete_all_memory()
     return "All enrolled objects, zones, queries, events, and retained evidence were deleted."
+
+
+def restore_mock_demo(facade: LocalRecallFacade) -> str:
+    restore = getattr(facade, "restore_demo_fixtures", None)
+    if restore is None:
+        raise RuntimeError("Restore demo data is only available in mock mode.")
+    restore()
+    return (
+        "Restored mock demo data: **Keys**, three zones, event **#1** (accepted), "
+        "and event **#2** (pending review). Refresh tables from the Memory tab or wait for the status timer."
+    )
 

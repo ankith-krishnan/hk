@@ -317,10 +317,8 @@ class LocalRecallFacadeImpl:
             raise
 
     def load_demo_zones(self) -> list[ZoneRecord]:
-        current = {zone.id for zone in self.store.list_zones(active_only=False)}
         for zone in DEFAULT_ZONES:
-            if zone.id not in current:
-                self.store.add_zone(zone)
+            self.store.upsert_zone(zone)
         return self.store.list_zones()
 
     def add_zone(
