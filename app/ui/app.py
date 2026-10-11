@@ -141,7 +141,7 @@ def create_app(facade, *, temp_allowed_path: str | None = None) -> gr.Blocks:
                     gr.Markdown(
                         "This optional stream sends laptop-browser frames to the local app and reports "
                         "whether frames arrive. Automatic movement analysis is not enabled in this build. "
-                        "Use the two image boxes above to ask Qwen to analyze a change.",
+                        "Use the two image boxes above to analyze a change.",
                         elem_classes=["lr-note"],
                     )
                     with gr.Row():
@@ -201,7 +201,9 @@ def create_app(facade, *, temp_allowed_path: str | None = None) -> gr.Blocks:
                     review_id = gr.Number(label="Event ID to review", precision=0)
                     approve = gr.Button("Approve event")
                     reject = gr.Button("Reject event")
-                review_result = gr.Markdown()
+                review_result = gr.Markdown(
+                    "Choose an event ID from **Events awaiting review**, then approve or reject."
+                )
                 gr.Markdown(
                     "### Correct an event from visible evidence\n"
                     "Use the event ID from the review list. Corrections are applied to the saved event "
@@ -209,6 +211,7 @@ def create_app(facade, *, temp_allowed_path: str | None = None) -> gr.Blocks:
                     elem_classes=["lr-note"],
                 )
                 with gr.Row():
+                    correction_id = gr.Number(label="Event ID to correct", precision=0)
                     correction_type = gr.Dropdown(
                         choices=["move", "appear", "disappear", "no_change"],
                         value="move",
@@ -218,7 +221,9 @@ def create_app(facade, *, temp_allowed_path: str | None = None) -> gr.Blocks:
                     correction_from = gr.Textbox(label="From zone ID", placeholder="left_tray")
                     correction_to = gr.Textbox(label="To zone ID", placeholder="right_tray")
                     correction_button = gr.Button("Apply correction")
-                correction_result = gr.Markdown()
+                correction_result = gr.Markdown(
+                    "Enter an event ID from the timeline, adjust fields, then apply correction."
+                )
                 memory_gallery = gr.Gallery(label="Saved event evidence", columns=4, height=300)
 
             with gr.Tab("Ask"):
@@ -255,7 +260,22 @@ def create_app(facade, *, temp_allowed_path: str | None = None) -> gr.Blocks:
                     "**Capture source:** paired-image upload/snapshot is ready · optional laptop-browser ingress is available on Watch. "
                     "Fixture inputs are supported for tests and demos."
                 )
-                zones_button = gr.Button("Load three demo zones", variant="primary")
+                if isinstance(facade, MockFacade):
+                    gr.Markdown(
+                        "In mock mode, **Load three demo zones** registers the three default regions and "
+                        "restores them if you disabled one earlier. The **Memory** tab lists **events**, not zones. "
+                        "Use **Load full mock demo** below to restore sample objects and events after **Delete all memory**.",
+                        elem_classes=["lr-note"],
+                    )
+                    load_full_mock_button = gr.Button(
+                        "Load full mock demo (zones, keys, events)",
+                        variant="primary",
+                    )
+                    load_full_mock_result = gr.Markdown()
+                zones_button = gr.Button(
+                    "Load three demo zones",
+                    variant="secondary" if isinstance(facade, MockFacade) else "primary",
+                )
                 zone_result = gr.Markdown("No zones loaded yet.")
                 with gr.Row():
                     setup_zone_table = gr.Dataframe(
@@ -322,6 +342,14 @@ def create_app(facade, *, temp_allowed_path: str | None = None) -> gr.Blocks:
                 )
                 delete_button = gr.Button("Delete all memory", variant="stop")
                 delete_result = gr.Markdown()
+                if isinstance(facade, MockFacade):
+                    gr.Markdown(
+                        "Mock mode keeps data in memory only. **Delete all memory** clears the demo until you "
+                        "restore fixtures or restart the app.",
+                        elem_classes=["lr-note"],
+                    )
+                    restore_mock_button = gr.Button("Restore mock demo data", variant="secondary")
+                    restore_mock_result = gr.Markdown()
 
         def wrapped_analyze(before_image, after_image):
             try:
@@ -379,6 +407,20 @@ def create_app(facade, *, temp_allowed_path: str | None = None) -> gr.Blocks:
             except Exception as exc:
                 raise gr.Error(str(exc)) from exc
 
+        refresh_outputs = [
+            status_line,
+            system_status,
+            camera_health,
+            setup_source_status,
+            object_table,
+            event_table,
+            memory_gallery,
+            review_table,
+            setup_zone_table,
+            setup_object_table,
+        ]
+        memory_message_outputs = [review_result, correction_result]
+
         def refresh_all():
             try:
                 return build_refresh_outputs(facade)
@@ -386,13 +428,15 @@ def create_app(facade, *, temp_allowed_path: str | None = None) -> gr.Blocks:
                 message = f"Status unavailable: {exc}"
                 return message, message, message, message, [], [], [], [], [], []
 
-        def save_zone(name, slug, left, top, right, bottom):
+        def memory_panel_placeholders():
+            return (
+                "Choose an event ID from **Events awaiting review**, then approve or reject.",
+                "Enter an event ID from the timeline, adjust fields, then apply correction.",
+            )
+
+        def wrapped_save_zone(name, slug, left, top, right, bottom):
             try:
-                if hasattr(facade, "add_zone"):
-                    record = facade.add_zone(name, slug, left, top, right, bottom)
-                else:
-                    raise RuntimeError("Zone editing is not available in this facade yet.")
-                return f"Saved zone **{record.display_name}** (`{record.id}`)."
+                return callbacks.save_zone(facade, name or "", slug or "", left, top, right, bottom)
             except Exception as exc:
                 raise gr.Error(str(exc)) from exc
 
@@ -421,14 +465,16 @@ def create_app(facade, *, temp_allowed_path: str | None = None) -> gr.Blocks:
             inputs=[object_name, object_aliases, reference],
             outputs=[setup_result],
             queue=True,
+        ).then(refresh_all, outputs=refresh_outputs, queue=False)
+        zones_button.click(wrapped_load_zones, outputs=[zone_result, setup_zone_table], queue=True).then(
+            refresh_all, outputs=refresh_outputs, queue=False
         )
-        zones_button.click(wrapped_load_zones, outputs=[zone_result], queue=True)
         zone_save.click(
-            save_zone,
+            wrapped_save_zone,
             inputs=[zone_name, zone_slug, x1, y1, x2, y2],
             outputs=[zone_result],
             queue=True,
-        )
+        ).then(refresh_all, outputs=refresh_outputs, queue=False)
         browser_camera.stream(
             wrapped_ingest,
             inputs=[browser_camera, source_id],
@@ -441,49 +487,56 @@ def create_app(facade, *, temp_allowed_path: str | None = None) -> gr.Blocks:
         reject.click(lambda event_id: wrapped_review(event_id, "reject"), inputs=[review_id], outputs=[review_result], queue=True)
         correction_button.click(
             wrapped_correction,
-            inputs=[review_id, correction_type, correction_object, correction_from, correction_to],
+            inputs=[correction_id, correction_type, correction_object, correction_from, correction_to],
             outputs=[correction_result],
             queue=True,
         )
         delete_object_button.click(wrapped_delete_object, inputs=[delete_object_id], outputs=[setup_result], queue=True)
-        delete_zone_button.click(wrapped_delete_zone, inputs=[delete_zone_id], outputs=[zone_result], queue=True)
+        delete_zone_button.click(wrapped_delete_zone, inputs=[delete_zone_id], outputs=[zone_result], queue=True).then(
+            refresh_all, outputs=refresh_outputs, queue=False
+        )
         export_button.click(wrapped_export, outputs=[export_file], queue=True)
-        delete_button.click(wrapped_delete, inputs=[delete_confirm], outputs=[delete_result], queue=True)
+        delete_button.click(wrapped_delete, inputs=[delete_confirm], outputs=[delete_result], queue=True).then(
+            refresh_all, outputs=refresh_outputs, queue=False
+        ).then(memory_panel_placeholders, outputs=memory_message_outputs, queue=False)
+
+        if isinstance(facade, MockFacade):
+
+            def wrapped_restore_mock():
+                try:
+                    return callbacks.restore_mock_demo(facade)
+                except Exception as exc:
+                    raise gr.Error(str(exc)) from exc
+
+            def refresh_after_mock_restore(message):
+                return (message, *refresh_all())
+
+            restore_mock_button.click(
+                wrapped_restore_mock,
+                outputs=[restore_mock_result],
+                queue=True,
+            ).then(
+                refresh_after_mock_restore,
+                inputs=[restore_mock_result],
+                outputs=[restore_mock_result, *refresh_outputs],
+                queue=False,
+            )
+
+            load_full_mock_button.click(
+                wrapped_restore_mock,
+                outputs=[load_full_mock_result],
+                queue=True,
+            ).then(
+                refresh_after_mock_restore,
+                inputs=[load_full_mock_result],
+                outputs=[load_full_mock_result, *refresh_outputs],
+                queue=False,
+            )
 
         timer = gr.Timer(1.0)
-        timer.tick(
-            refresh_all,
-            outputs=[
-                status_line,
-                system_status,
-                camera_health,
-                setup_source_status,
-                object_table,
-                event_table,
-                memory_gallery,
-                review_table,
-                setup_zone_table,
-                setup_object_table,
-            ],
-            queue=False,
-        )
+        timer.tick(refresh_all, outputs=refresh_outputs, queue=False)
         demo.load(lambda: str(uuid4()), outputs=[source_id], queue=False)
-        demo.load(
-            refresh_all,
-            outputs=[
-                status_line,
-                system_status,
-                camera_health,
-                setup_source_status,
-                object_table,
-                event_table,
-                memory_gallery,
-                review_table,
-                setup_zone_table,
-                setup_object_table,
-            ],
-            queue=False,
-        )
+        demo.load(refresh_all, outputs=refresh_outputs, queue=False)
         demo.queue(default_concurrency_limit=2, max_size=16)
 
     demo.allowed_paths = allowed_paths

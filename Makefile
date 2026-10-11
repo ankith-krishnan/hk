@@ -4,7 +4,10 @@ preflight:
 	./scripts/preflight.sh
 
 setup:
-	python3 -m venv .venv
+	@chmod +x scripts/ensure_python.sh
+	@PY=$$(./scripts/ensure_python.sh); echo "Using $$PY"; \
+	$$PY -m venv .venv; \
+	.venv/bin/python -m pip install -U pip; \
 	.venv/bin/python -m pip install -e '.[dev]'
 
 model-start:

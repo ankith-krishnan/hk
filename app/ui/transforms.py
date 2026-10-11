@@ -12,6 +12,13 @@ from datetime import UTC, datetime
 from app.schemas import EventRecord, QueryResult, SystemStatus
 
 
+def is_mock_labeled_model(model_name: str | None) -> bool:
+    if not model_name:
+        return False
+    upper = model_name.upper()
+    return upper == "MOCK" or upper.startswith(("MOCK/", "MOCK "))
+
+
 def event_markdown(event: EventRecord) -> str:
     object_name = event.object_id or "Unknown object"
     transition = f"{event.from_zone_id or 'unknown'} → {event.to_zone_id or 'unknown'}"
@@ -25,8 +32,11 @@ def event_markdown(event: EventRecord) -> str:
     evidence = " ".join(event.visible_evidence) or event.uncertainty_reason or "No visible evidence supplied."
     model = event.model_name or "local model"
     latency = f" · {event.model_latency_ms} ms" if event.model_latency_ms is not None else ""
+    mock_banner = ""
+    if is_mock_labeled_model(event.model_name):
+        mock_banner = "**MOCK · simulated event (fixture evidence)**  \n"
     return (
-        f"### {object_name}: {event_name}\n"
+        f"{mock_banner}### {object_name}: {event_name}\n"
         f"**{transition}** · {event.confidence:.0%} confidence · {review} · Event #{event.id}\n\n"
         f"{evidence}\n\n"
         f"_Interpretation: {model}{latency}."

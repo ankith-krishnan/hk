@@ -89,3 +89,10 @@ Initial interpretation: this is an ARM64 Ubuntu GB10 environment with a suitable
 - Changed: `app/ui/app.py`, `app/ui/callbacks.py`, `app/ui/transforms.py`, `app/ui/mock_facade.py`, `tests/test_ui_contract.py`, and `UI_HANDOFF.md`.
 - Verification: `git diff --check` passed. Automated Python tests, Ruff, and browser launch were not run because this Windows workspace has no Python interpreter, `.venv`, or WSL installation available.
 - Not verified: visual browser review, `python -m app.ui.app --mock --port 7861`, `pytest tests/test_ui_contract.py`, and `ruff check app scripts tests`. These remain the next verification step on the project’s Linux/Python environment.
+
+### Frontend B: callbacks, mock parity, and labeling
+
+- Implemented: thin Gradio callbacks wired to `LocalRecallFacade`; mock restore after delete-all; shared enrollment/zone helpers on `app/facade.py` for mock/backend parity; `MOCK_MODE.md` labeling policy; dynamic load-demo messaging from `DEFAULT_ZONES`; Python 3.11–3.12 gate in `ensure_python.sh`.
+- Changed: `app/ui/*`, `app/facade.py` (shared validators only on this PR—demo zone upsert is on `feature/backend-demo-zones`), `scripts/ensure_python.sh`, `Makefile`, `README.md`, `AGENTS.md`, `tests/test_ui_callbacks.py`, `tests/test_facade_conformance.py`, `tests/test_mock_labeling.py`.
+- Verification: `make test` (70 passed) and `make lint` observed on macOS mock path; mock UI smoke on Setup/Memory/System tabs; callback smoke for Analyze/Ask/review/export/delete/restore.
+- Next: open Frontend B PR stacked on merged or parallel backend demo-zone PR; optional browser BEFORE/AFTER upload QA on Watch tab.

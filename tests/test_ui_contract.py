@@ -49,9 +49,9 @@ def test_mock_refresh_rows_are_readable_and_do_not_expose_paths():
     events = refresh_event_rows(facade)
     zones, objects = refresh_setup_rows(facade)
 
-    assert events[0][0] == 1
+    assert events[0][0] == 2
     assert events[0][1].endswith("UTC")
-    assert events[0][6] == "91%"
+    assert events[0][6] == "54%"
     assert zones[0][1] == "left_tray"
     assert objects[0][0] == "Keys"
     assert all("localrecall-mock" not in str(row) for row in objects)
@@ -87,7 +87,7 @@ def test_ask_requires_a_question_and_returns_one_gallery_item_per_evidence_path(
     assert "Confidence" in response
     assert "#1" in response
     assert len(gallery) == 2
-    with pytest.raises(ValueError, match="Ask a question"):
+    with pytest.raises(ValueError, match="Type a question"):
         ask(facade, "   ")
 
 

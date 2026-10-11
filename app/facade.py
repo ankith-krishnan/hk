@@ -35,6 +35,51 @@ from app.schemas import (
 )
 from app.vlm_client import MockVLMClient, OpenAICompatibleVLMClient, VLMClient
 
+
+def normalize_object_id(display_name: str) -> str:
+    object_id = re.sub(r"[^a-z0-9]+", "_", display_name.lower()).strip("_")
+    if not object_id or not object_id[0].isalpha():
+        raise ValueError("Object name must produce a lowercase ID beginning with a letter")
+    return object_id
+
+
+def parse_object_aliases(description: str) -> list[str]:
+    return sorted(
+        {
+            alias.strip()
+            for alias in re.split(r"[,;]", description or "")
+            if alias.strip()
+        }
+    )
+
+
+def build_zone_record(
+    display_name: str,
+    zone_id: str,
+    x1: float,
+    y1: float,
+    x2: float,
+    y2: float,
+    *,
+    active_zone_count: int,
+) -> ZoneRecord:
+    display_name = display_name.strip()
+    zone_id = zone_id.strip().lower()
+    if not display_name or not re.fullmatch(r"[a-z][a-z0-9_]{0,39}", zone_id):
+        raise ValueError("Enter a zone name and a lowercase ID such as `shelf`.")
+    if not (0 <= x1 < x2 <= 1 and 0 <= y1 < y2 <= 1):
+        raise ValueError("Zone bounds must satisfy 0 <= x1 < x2 <= 1 and 0 <= y1 < y2 <= 1.")
+    if zone_id == "outside_view":
+        raise ValueError("outside_view is reserved for system events.")
+    if active_zone_count >= 4:
+        raise ValueError("The workspace is limited to four named zones.")
+    return ZoneRecord(
+        id=zone_id,
+        display_name=display_name,
+        polygon=[(x1, y1), (x2, y1), (x2, y2), (x1, y2)],
+    )
+
+
 DEFAULT_ZONES = (
     ZoneRecord(
         id="left_tray",
@@ -283,18 +328,10 @@ class LocalRecallFacadeImpl:
         if len(self.store.list_objects()) >= 5:
             raise ValueError("The demo object registry is limited to five active objects")
         image = self._validate_frame(reference_image, "Reference")
-        object_id = re.sub(r"[^a-z0-9]+", "_", display_name.lower()).strip("_")
-        if not object_id or not object_id[0].isalpha():
-            raise ValueError("Object name must produce a lowercase ID beginning with a letter")
+        object_id = normalize_object_id(display_name)
         if any(obj.id == object_id for obj in self.store.list_objects(active_only=False)):
             raise ValueError(f"Object ID already exists: {object_id}")
-        aliases = sorted(
-            {
-                alias.strip()
-                for alias in re.split(r"[,;]", description or "")
-                if alias.strip()
-            }
-        )
+        aliases = parse_object_aliases(description)
         object_dir = self.objects_dir / object_id
         object_dir.mkdir(parents=True, exist_ok=False)
         reference_path = object_dir / "reference.jpg"
@@ -317,29 +354,21 @@ class LocalRecallFacadeImpl:
             raise
 
     def load_demo_zones(self) -> list[ZoneRecord]:
-        current = {zone.id for zone in self.store.list_zones(active_only=False)}
         for zone in DEFAULT_ZONES:
-            if zone.id not in current:
-                self.store.add_zone(zone)
+            self.store.upsert_zone(zone)
         return self.store.list_zones()
 
     def add_zone(
         self, display_name: str, zone_id: str, x1: float, y1: float, x2: float, y2: float
     ) -> ZoneRecord:
-        display_name = display_name.strip()
-        zone_id = zone_id.strip().lower()
-        if not display_name or not re.fullmatch(r"[a-z][a-z0-9_]{0,39}", zone_id):
-            raise ValueError("Enter a zone name and a lowercase ID such as `shelf`.")
-        if not (0 <= x1 < x2 <= 1 and 0 <= y1 < y2 <= 1):
-            raise ValueError("Zone bounds must satisfy 0 <= x1 < x2 <= 1 and 0 <= y1 < y2 <= 1.")
-        if zone_id == "outside_view":
-            raise ValueError("outside_view is reserved for system events.")
-        if len(self.store.list_zones()) >= 4:
-            raise ValueError("The workspace is limited to four named zones.")
-        record = ZoneRecord(
-            id=zone_id,
-            display_name=display_name,
-            polygon=[(x1, y1), (x2, y1), (x2, y2), (x1, y2)],
+        record = build_zone_record(
+            display_name,
+            zone_id,
+            x1,
+            y1,
+            x2,
+            y2,
+            active_zone_count=len(self.store.list_zones()),
         )
         return self.store.add_zone(record)
 
