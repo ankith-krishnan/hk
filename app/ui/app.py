@@ -203,9 +203,9 @@ def create_app(facade, *, temp_allowed_path: str | None = None) -> gr.Blocks:
                 )
                 if isinstance(facade, MockFacade):
                     gr.Markdown(
-                        "In mock mode, **Load three demo zones** only registers region geometry. "
-                        "The **Memory** tab lists **events**, not zones. After **Delete all memory**, "
-                        "use **Load full mock demo** below to bring back sample events #1 and #2.",
+                        "In mock mode, **Load three demo zones** registers the three default regions and "
+                        "restores them if you disabled one earlier. The **Memory** tab lists **events**, not zones. "
+                        "Use **Load full mock demo** below to restore sample objects and events after **Delete all memory**.",
                         elem_classes=["lr-note"],
                     )
                     load_full_mock_button = gr.Button(

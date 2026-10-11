@@ -5,7 +5,8 @@ from __future__ import annotations
 import numpy as np
 
 from app.contracts import LocalRecallFacade
-from app.ui.transforms import event_markdown, query_markdown, status_markdown
+from app.facade import DEFAULT_ZONES
+from app.ui.transforms import event_markdown, is_mock_labeled_model, query_markdown, status_markdown
 
 
 def analyze_pair(facade: LocalRecallFacade, before: np.ndarray | None, after: np.ndarray | None):
@@ -57,12 +58,18 @@ def load_zones(facade: LocalRecallFacade):
     zones = facade.load_demo_zones()
     if not zones:
         return "No demo zones are available. Check backend or mock fixture setup.", []
-    demo_names = [zone.display_name for zone in zones if zone.id in {"left_tray", "center_mat", "right_tray"}]
-    names = ", ".join(demo_names) if demo_names else ", ".join(zone.display_name for zone in zones)
+    demo_ids = {zone.id for zone in DEFAULT_ZONES}
+    loaded_defaults = [zone for zone in zones if zone.id in demo_ids]
+    count = len(loaded_defaults)
+    names = ", ".join(zone.display_name for zone in loaded_defaults) or ", ".join(
+        zone.display_name for zone in zones
+    )
+    region_word = "region" if count == 1 else "regions"
     message = (
-        f"**Loaded 3 workspace regions:** {names}.\n\n"
-        "Check the **Loaded regions** table below — you should see `left_tray`, `center_mat`, and `right_tray`. "
-        "Regions are not listed on the **Memory** tab (that tab is for **events** only)."
+        f"**Loaded {count} default workspace {region_word}:** {names}.\n\n"
+        "This re-enables any previously disabled default zones and restores their standard shapes. "
+        "Check the **Loaded regions** table below. Regions are not listed on the **Memory** tab "
+        "(that tab is for **events** only)."
     )
     return message, zones_table_rows(facade)
 
@@ -96,8 +103,6 @@ def add_zone(
         raise ValueError("Enter a zone name (for example: Shelf).")
     if not slug:
         raise ValueError("Enter a zone ID (for example: shelf).")
-    if x2 <= x1 or y2 <= y1:
-        raise ValueError("Zone corners must form a rectangle: x2 > x1 and y2 > y1.")
     return facade.add_zone(name, slug, float(x1), float(y1), float(x2), float(y2))
 
 
@@ -142,7 +147,8 @@ def refresh(facade: LocalRecallFacade):
             (event.composite_path, "Comparison"),
         ):
             if path:
-                gallery.append((path, f"Event #{event.id} · {label}"))
+                prefix = "MOCK · " if is_mock_labeled_model(event.model_name) else ""
+                gallery.append((path, f"{prefix}Event #{event.id} · {label}"))
     pending = [
         [event.id, event.object_id or "Unknown", event.event_type, event.confidence, event.from_zone_id, event.to_zone_id]
         for event in events
@@ -172,9 +178,9 @@ def correct_event(facade, event_id, event_type, object_id, from_zone_id, to_zone
         event = facade.correct_event(
             event_id,
             event_type,
-            object_id.strip() or None,
-            from_zone_id.strip() or None,
-            to_zone_id.strip() or None,
+            (object_id or "").strip() or None,
+            (from_zone_id or "").strip() or None,
+            (to_zone_id or "").strip() or None,
         )
     except KeyError:
         raise ValueError(f"No event #{event_id} exists. Pick an ID from the timeline or review list.") from None
@@ -228,7 +234,7 @@ def restore_mock_demo(facade: LocalRecallFacade) -> str:
         raise RuntimeError("Restore demo data is only available in mock mode.")
     restore()
     return (
-        "Restored mock demo data: **Keys**, three zones, event **#1** (accepted), "
+        "**MOCK · restored fixture data:** **Keys**, three zones, event **#1** (accepted), "
         "and event **#2** (pending review). Open the Memory tab to see them."
     )
 

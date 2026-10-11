@@ -21,4 +21,4 @@ make test
 python -m app.ui.app --mock --port 7861
 ```
 
-Mock mode must not start a model server, access camera hardware, or initialize persistent backend storage. Keep it visibly marked MOCK.
+Mock mode must not start a model server, access camera hardware, or initialize persistent backend storage. Keep it visibly marked MOCK; see `MOCK_MODE.md` for labeling vs validation rules.

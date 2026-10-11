@@ -72,7 +72,7 @@ Then open `http://127.0.0.1:7860` on that laptop and allow camera access if usin
 
 ### Local development quick start
 
-Requires **Python 3.11 or 3.12**. Conda **base** on macOS is often **3.14**, which cannot install this project’s pinned Gradio/pydantic stack. Use a 3.12 env first:
+Requires **Python 3.11 or 3.12** (`requires-python = ">=3.11,<3.13"` in `pyproject.toml`). If your default `python3` is outside that range, `make setup` will print the detected version and install hints. Use a 3.12 env first:
 
 ```bash
 conda create -y -n localrecall python=3.12

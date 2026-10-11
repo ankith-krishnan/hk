@@ -1,7 +1,5 @@
 .PHONY: preflight setup model-start model-smoke run test lint eval demo-bundle offline-check stop
 
-PYTHON ?= $(shell ./scripts/ensure_python.sh 2>/dev/null || true)
-
 preflight:
 	./scripts/preflight.sh
 

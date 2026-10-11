@@ -81,3 +81,10 @@ Initial interpretation: this is an ARM64 Ubuntu GB10 environment with a suitable
 - Verification: no tests or browser launch were run in this milestone. The UI layout still needs a visual check in mock mode at laptop and narrow widths.
 - Current observed model setup: Docker image `vllm/vllm-openai:qwen38` is present; Docker volume `localrecall-qwen38-cache` was not present at the latest inspection, so the first model start still needs to download weights.
 - Next: view the mock UI in a browser, confirm all five tabs and image-pair flow, then adjust any layout issues found. Keep auto Watch disabled until the real local image and manual database/query gates pass.
+
+### Frontend B: callbacks, mock parity, and labeling
+
+- Implemented: thin Gradio callbacks wired to `LocalRecallFacade`; mock restore after delete-all; shared enrollment/zone helpers on `app/facade.py` for mock/backend parity; `MOCK_MODE.md` labeling policy; dynamic load-demo messaging from `DEFAULT_ZONES`; Python 3.11–3.12 gate in `ensure_python.sh`.
+- Changed: `app/ui/*`, `app/facade.py` (shared validators only on this PR—demo zone upsert is on `feature/backend-demo-zones`), `scripts/ensure_python.sh`, `Makefile`, `README.md`, `AGENTS.md`, `tests/test_ui_callbacks.py`, `tests/test_facade_conformance.py`, `tests/test_mock_labeling.py`.
+- Verification: `make test` (70 passed) and `make lint` observed on macOS mock path; mock UI smoke on Setup/Memory/System tabs; callback smoke for Analyze/Ask/review/export/delete/restore.
+- Next: open Frontend B PR stacked on merged or parallel backend demo-zone PR; optional browser BEFORE/AFTER upload QA on Watch tab.
