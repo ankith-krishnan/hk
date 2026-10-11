@@ -1,156 +1,247 @@
-# Frontend A: Build the LocalRecall screens
+# Frontend A — screen, layout, and user instructions
 
-## Your mission
+## Mission
 
-You are responsible for how the app looks and how a person moves from one screen to another. You do **not** need to know how an AI model works. Think of the backend as a vending machine: you give it a request through an agreed button or function, and it gives you a result. Your job is to make those requests and results easy to understand.
+Frontend A owns the visible Gradio experience for LocalRecall: the screen structure, visual hierarchy, labels, instructions, empty states, and presentation flow.
 
-The app is already built with **Gradio Blocks**, which lets Python describe a web page. The main file is `app/ui/app.py`. It already contains five tabs: **Watch**, **Memory**, **Ask**, **Setup**, and **System & Privacy**. Your job is to make that page clear, calm, and easy for a first-time user without changing what the backend promises to do.
+The interface should make the product understandable to a first-time presenter. A user should know what to upload, when the laptop camera is active, what LocalRecall observed, where the answer came from, and how privacy is being handled.
 
-## What you own
+Follow [`LocalRecall_Codex_Master_Prompt.md`](./LocalRecall_Codex_Master_Prompt.md) for the product requirements and [`BACKEND_A.md`](./BACKEND_A.md) for the model-result terminology and confidence behavior.
 
-- `app/ui/app.py`: page layout, component labels, tab organization, button text, help text, and visual styling.
-- Optional small styling changes in the CSS string inside that file.
-- A short screenshot or written before/after note showing the improvement.
+## Owns
 
-## What you should leave alone
+Frontend A owns:
 
-- Do not put model calls, SQL statements, image analysis, or object-location rules in the UI file.
-- Do not add JavaScript, React, another web server, a public Gradio share link, or a WebSocket system.
-- Do not make Watch Mode look like automatic event detection. At the moment it only receives browser frames; automatic motion analysis is deliberately disabled.
-- Do not remove the manual BEFORE/AFTER upload path. It is the main supported flow and must work even if there is no camera.
-- Do not rename a function or change its inputs/outputs without telling Frontend B and the Backend owner first.
+- The Gradio Blocks page structure and five-tab layout.
+- Headings, labels, helper text, instructions, warnings, badges, and empty states.
+- Visual hierarchy for the Watch, Memory, Ask, Setup, and System & Privacy screens.
+- How BEFORE/AFTER evidence, event details, confidence, and source records are presented.
+- Clear distinction between live browser-camera mode, manual image-pair mode, fixture mode, mock mode, and backend mode.
+- Accessible, readable local styling using Gradio-supported components and local assets only.
+- The presenter/demo flow and fallback instructions when camera access or streaming is unavailable.
+- UI-level acceptance scenarios and screenshots or visual handoff notes.
 
-## First, understand the small amount of Gradio you need
+Typical files:
 
-Open `app/ui/app.py` and find this general pattern:
-
-```python
-with gr.Blocks() as demo:
-    question = gr.Textbox(label="Ask a question")
-    answer = gr.Markdown()
-    ask_button = gr.Button("Ask")
-    ask_button.click(run_ask, inputs=[question], outputs=[answer])
+```text
+app/ui/app.py
+app/ui/transforms.py       # display formatting and presentation helpers
+TASK_UI.md
+UI_HANDOFF.md
+tests/test_ui_contract.py  # presentation-facing contract checks, coordinated with Frontend B
 ```
 
-Read it as: “Put a text box on the page. Put an answer area on the page. When the button is clicked, call `run_ask` with the text box’s value, then put the returned value in the answer area.”
+Frontend A may propose component IDs and output groupings, but callback wiring belongs to Frontend B. Shared facade methods and schemas belong to the backend owner.
 
-The main Gradio pieces used here are:
+## Does not own
 
-- `gr.Tabs()` and `gr.Tab("Name")`: separate the app into pages.
-- `gr.Row()` and `gr.Column()`: place things side by side or stack them.
-- `gr.Markdown()`: show headings and ordinary help text.
-- `gr.Image()`: let the user upload or take a picture.
-- `gr.Button()`: start an action.
-- `gr.Dataframe()` and `gr.Gallery()`: show saved rows and pictures.
-- `.click(...)`, `.submit(...)`, `.stream(...)`, and `.load(...)`: say what should happen after a user action or page event.
+Frontend A does not own:
 
-You do not have to memorize these names. Copy the style of nearby code and change one small section at a time.
+- Backend model calls, prompt construction, response validation, or Qwen configuration.
+- SQLite, object memory, event state, query logic, or evidence persistence.
+- Browser-frame ingestion implementation, source leases, motion detection, or Watch Mode state.
+- The facade protocol or backend schemas without coordination with Backend B.
+- Long-running work inside layout construction, timers, or camera stream handlers.
+- A custom React/Vue/Vite frontend, custom JavaScript canvas, FastAPI layer, WebSocket service, or public Gradio share link.
+- Fake health, fake offline status, or fabricated events in backend mode.
 
-## Set up your work area
+The UI displays facts supplied by the facade. It must not infer a location, rewrite an event, or use `gr.State` as the source of truth.
 
-The current `main` worktree has a committed scaffold plus additional uncommitted changes. **Do not run `git reset`, `git clean`, or discard those changes.** Ask the team integrator to make a safe checkpoint commit first. After that, work in your own branch/worktree so two people do not overwrite the same file.
+## Product screen contract
 
-From the project folder, the integrator can create your worktree with:
+Build a single Python Gradio Blocks application with these five tabs.
 
-```bash
-git worktree add ../localrecall-front-a -b feature/frontend-a <checkpoint-commit>
-cd ../localrecall-front-a
+### 1. Watch — capture and analyze
+
+Primary purpose: guide the user through a reliable event capture.
+
+Include:
+
+- A concise explanation of the product and a visible local/offline status indicator.
+- Optional browser-owned live webcam input for Watch Mode.
+- Clear instructions such as: “Start the laptop camera, allow browser permission, then begin Watch Mode.”
+- Two separate non-streaming image inputs labeled `BEFORE` and `AFTER`.
+- A prominent manual fallback instruction: upload or take two snapshots even if live streaming is unavailable.
+- Motion/source health text showing connected, stale, disconnected, or unavailable states.
+- A latest event summary with object, source zone, destination zone, confidence, and evidence.
+- A clear distinction between “camera preview,” “frame received,” and “event analyzed.”
+
+The manual BEFORE/AFTER path is first-class. It must work without an active stream, a server camera, or Watch Mode.
+
+### 2. Memory — saved facts and evidence
+
+Primary purpose: show what LocalRecall has actually remembered.
+
+Include:
+
+- Current object locations in a readable table.
+- Recent event history with event IDs, timestamps, event type, object, and zones.
+- Review items separated from accepted events.
+- BEFORE, AFTER, and composite evidence where available.
+- Approve and reject controls supplied by Frontend B.
+- An empty state explaining that no accepted events have been saved yet.
+- A note that locations come from accepted observed events, not continuous video or guesses.
+
+Use the model’s vocabulary consistently: `move`, `appear`, `disappear`, `no_change`, `uncertain`, and the confidence bands defined by Backend A.
+
+### 3. Ask — answer from saved memory
+
+Primary purpose: answer questions from SQLite-backed records.
+
+Include:
+
+- A question field with examples such as “Where are my keys?” and “What moved most recently?”
+- A readable answer area.
+- Event ID and evidence references supporting the answer.
+- An explicit unknown/no-evidence state.
+- A short instruction that answers are based on saved observations and may be unknown when no event supports them.
+
+Never make a model answer look like a database fact unless the returned response includes its supporting records.
+
+### 4. Setup — objects and zones
+
+Primary purpose: establish the bounded tabletop vocabulary.
+
+Include:
+
+- A control to load the three demo zones: `left_tray`, `center_mat`, and `right_tray`.
+- A simple zone list or form showing names and normalized rectangle coordinates.
+- Object enrollment with reference-image upload or snapshot, display name, aliases, and a visible saved reference card.
+- A concise explanation that registered objects make event interpretation more conservative.
+- A source indicator showing browser camera, fixture, or paired-image mode.
+
+Do not require a JavaScript drawing canvas for the MVP. Keep the setup understandable and bounded to the documented object limit.
+
+### 5. System & Privacy — honest status and controls
+
+Primary purpose: make local operation and retention behavior inspectable.
+
+Include:
+
+- Actual model name and endpoint locality, without exposing secrets.
+- Offline/local status and application health.
+- Browser-frame health, model latency, event counts, and retained evidence count when supplied by the facade.
+- Export Session control.
+- Delete All Memory control with explicit confirmation and clear consequence text.
+- Privacy explanation: no continuous application video by default; event evidence is retained according to the app policy; transient browser/Gradio files may exist and are cleaned up according to the documented policy.
+
+Do not claim that no image bytes ever exist. Use the project’s precise privacy wording.
+
+## Interaction and layout rules
+
+- Use Python Gradio Blocks only.
+- Keep primary actions visible and place diagnostic details in an optional secondary section.
+- Use separate BEFORE and AFTER inputs; do not merge them into one ambiguous upload control.
+- Make the manual Analyze action visually distinct from Start Watch.
+- Show busy, success, warning, error, and disconnected states explicitly.
+- Keep important instructions near the control they explain.
+- Preserve evidence proportions and readable labels in previews.
+- Mark mock data clearly as `MOCK`; never present fixtures as real memory.
+- Keep all assets local. Do not load remote fonts, scripts, analytics, or CDN resources.
+- Disable Gradio public sharing.
+- Make the layout usable at the presenter laptop’s browser size without requiring terminal access from nontechnical users.
+
+## Camera and fallback instructions
+
+The camera belongs to the presenter laptop browser, not the headless Spark.
+
+The Watch screen must communicate this sequence:
+
+1. Open the app through the local browser/SSH-forwarded localhost URL.
+2. Start the laptop webcam input and grant browser permission.
+3. Confirm that frames are arriving before starting Watch Mode.
+4. For a dependable demo, use the two explicit BEFORE/AFTER inputs first.
+5. If the camera is denied, disconnected, or stale, upload PNG/JPEG images and continue manually.
+
+Do not tell users to open the raw Spark address when browser webcam permissions require localhost or HTTPS. Do not suggest that the Spark has a USB camera.
+
+## Coordination with Frontend B
+
+Frontend B owns buttons, callbacks, event handlers, and callback return wiring. Frontend A should provide a screen map before implementation:
+
+```text
+screen/tab -> component ID -> displayed purpose -> expected facade data -> empty/error state
 ```
 
-Then install and run the mock UI:
+Coordinate before changing:
 
-```bash
-make setup
-make test
-.venv/bin/python -m app.ui.app --mock --host 127.0.0.1 --port 7861
-```
+- Component IDs or callback input/output ordering.
+- Facade method names or shared Pydantic models.
+- The meaning of status badges, confidence labels, event evidence, or review states.
+- The browser-camera stream and timer components.
+- Any layout change that moves a component or changes its input/output contract.
 
-Open `http://127.0.0.1:7861` in a browser. Mock mode is safe for layout work. It uses fixture behavior and does not need the real model or Docker. It should say **MOCK** clearly.
+Frontend A may specify that a control exists and how it should read; Frontend B implements the callback that invokes the facade. Neither frontend role changes Backend A’s model contract directly.
 
-## Build the screen in small steps
+## Coordination with Backend A and Backend B
 
-### 1. Sketch the path a new person should follow
+Coordinate with Backend A when presenting:
 
-Write down the path in one sentence before editing code:
+- Model health or latency.
+- Event type and confidence labels.
+- Uncertain results, repair failures, or model errors.
+- Evidence wording derived from visible observations.
 
-1. Set up the object and zones.
-2. Provide BEFORE and AFTER images.
-3. Analyze the change.
-4. Read the result and inspect its evidence.
-5. Ask where the object is and see which event supports the answer.
+Coordinate with Backend B when presenting:
 
-The current tab names can stay. Improve the headings and helper text so the user knows what to do next. Use short words and one instruction at a time.
+- Current locations and accepted events.
+- Review/approve/reject states.
+- Query answers and event IDs.
+- Deletion, export, and retained evidence counts.
 
-### 2. Make the important action easy to find
+The UI must consume the shared facade. It must not import `VLMClient`, write SQLite, inspect model responses, or maintain authoritative event history.
 
-The Watch tab has two image boxes and an **Analyze Change** button. Make that button visually prominent. Put a short sentence above the image boxes, for example: “Add an earlier photo on the left and a later photo on the right.” Explain that either uploads or browser snapshots are acceptable.
+## Accessibility and presentation checklist
 
-Keep the two image labels explicit: **BEFORE** and **AFTER**. Do not call them “Image 1” and “Image 2”; order matters to the event result.
+- Every image input has a clear label and a short instruction.
+- BEFORE and AFTER are visually distinguishable.
+- Status colors are accompanied by text; color is not the only signal.
+- Error text explains what the user can do next.
+- Empty states explain why the area is empty and which action fills it.
+- Destructive actions state what will be removed before confirmation.
+- Technical terms such as `uncertain` and `review` have a plain-language explanation.
+- The main demo can be completed without reading raw JSON or opening a terminal.
 
-### 3. Explain the result plainly
+## Acceptance checklist
 
-After analysis, the page shows a short summary, structured event details, and an evidence gallery. Make sure those three outputs are visually grouped and labeled. A person should be able to answer:
+Verify in mock mode:
 
-- What does the system think happened?
-- How sure is it?
-- Which pictures support the answer?
-- Does it need a human review?
-
-Avoid showing a long block of raw JSON as the only explanation. The structured JSON can remain available as a secondary details panel.
-
-### 4. Make other tabs easy to scan
-
-- **Memory:** clearly label current object locations, recent events, and items awaiting review.
-- **Ask:** show an example question such as “Where are my keys?” and a visible evidence area.
-- **Setup:** explain the object name, aliases, reference photo, and zones with a small example.
-- **System & Privacy:** say where frames travel, what is retained, and that temporary upload files can exist and are cleaned up.
-
-Use friendly labels, but do not promise privacy behavior the app has not measured. For instance, say “No continuous video writer is enabled” rather than “Nothing is ever saved.”
-
-### 5. Check narrow windows and errors
-
-Open the browser at a normal laptop size and make the window narrower. Labels and buttons should still be understandable. Place related things together. If a component disappears below the fold, add an obvious heading so the user knows what is there.
-
-Do not hide useful error messages. The UI wrappers turn exceptions into Gradio errors. Make sure the user can see them and recover, for example by adding the missing image or loading zones.
-
-## How to change the page safely
-
-1. Edit one tab or one group of labels.
-2. Save the file.
-3. Stop and restart the mock UI if it does not reload automatically.
-4. Click through the affected part in the browser.
-5. Check that the neighboring tabs still appear.
-6. Run `make test` and `make lint`.
-7. Ask Frontend B to check any component whose button callback you moved.
-8. Commit only your UI file and any UI-only screenshots/notes.
-
-Useful commands:
-
-```bash
-git status --short
-make test
-make lint
-```
-
-Before committing, `git status --short` should show the files you meant to change. Do not include `.env`, `.venv`, model files, event pictures, or the local SQLite database.
+1. `python -m app.ui.app --mock --port 7861` launches without a model, camera, or database setup.
+2. All five tabs are present and readable.
+3. Mock status and fixture records are clearly marked `MOCK`.
+4. A user can upload or capture two distinct BEFORE/AFTER images and see an evidence result without starting a stream.
+5. The Ask screen shows an answer and supporting event evidence.
+6. Memory shows current locations, event history, and review states.
+7. Setup exposes demo zones and object enrollment instructions.
+8. System & Privacy shows real-looking mock status without claiming it is live.
+9. Camera-denied, stale, empty, and backend-error states are understandable.
+10. Delete All Memory requires explicit confirmation.
+11. The UI does not call inference from timers or stream callbacks.
+12. `pytest tests/test_ui_contract.py` passes, with the exact result recorded in the handoff.
 
 ## Definition of done
 
-- A first-time user can find the manual BEFORE/AFTER path without coaching.
-- The page still has all five tabs.
-- Mock mode is clearly labeled as mock.
-- Camera streaming is described as optional and ingress-only; no automatic detection claim appears.
-- Results show a plain-language summary and visible evidence.
-- The page remains usable at laptop width and gives readable errors.
-- `make test` and `make lint` pass.
-- Frontend B and the integrator know exactly which UI labels or component positions changed.
+Frontend A is complete when:
 
-## If you get stuck
+- The five screens provide a coherent end-to-end user journey.
+- Manual image-pair analysis is obvious and usable as the reliable fallback.
+- Live camera instructions correctly identify the browser laptop as the camera owner.
+- Saved memory and answers visibly link back to evidence.
+- Mock, empty, error, stale-camera, review, and destructive-action states are designed.
+- The layout and component contract are documented for Frontend B.
+- No UI text contradicts Backend A’s validation, confidence, or uncertainty behavior.
+- Tests and visual/demo notes are recorded in `UI_HANDOFF.md`.
 
-Copy a nearby Gradio component pattern. Search the repository with:
+## Handoff
 
-```bash
-rg "gr\.Tab|\.click\(|\.submit\(" app/ui
-```
+Record:
 
-Ask the team before changing a function’s arguments or return values. That may be part of the shared bridge between the page and the backend.
+- Screen map and component IDs.
+- Changed files.
+- Mock launch command and test command.
+- Exact test results.
+- Screenshots or a concise visual review, if available.
+- Required facade methods or missing backend data.
+- Any unresolved callback wiring that Frontend B must complete.
+
+Do not claim camera streaming or backend inference works based only on static layout inspection; record those as unverified until exercised through the browser and facade.

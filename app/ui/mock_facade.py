@@ -90,7 +90,12 @@ class MockFacade:
             dropped_frames=0,
             watch_mode=self.watch_mode,
             event_count=len(self.events),
-            evidence_count=0,
+            evidence_count=sum(
+                1
+                for event in self.events
+                for path in (event.pre_image_path, event.post_image_path, event.composite_path)
+                if path
+            ),
         )
 
     def get_latest_frame(self):
@@ -160,10 +165,15 @@ class MockFacade:
         lower = question.lower()
         if "key" in lower:
             event = next((item for item in self.events if item.accepted), None)
+            if event is None:
+                return QueryResult(answer="MOCK: no saved observation is available for the keys.")
             return QueryResult(
                 answer=f"MOCK: Keys were last observed in {self._state_zone.replace('_', ' ').title()}.",
-                event_ids=[event.id] if event else [],
-                confidence=event.confidence if event else None,
+                event_ids=[event.id],
+                evidence_paths=(
+                    [path for path in (event.pre_image_path, event.post_image_path, event.composite_path) if path]
+                ),
+                confidence=event.confidence,
             )
         return QueryResult(answer="MOCK: no fixture answer for that question.")
 
