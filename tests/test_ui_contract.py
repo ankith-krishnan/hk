@@ -1,11 +1,11 @@
 import numpy as np
 import pytest
-
+from app.schemas import QueryResult
 from app.ui.app import create_app
 from app.ui.callbacks import analyze_pair, ask, refresh_event_rows, refresh_setup_rows
 from app.ui.mock_facade import MockFacade
 from app.ui.transforms import query_markdown, source_status_markdown
-from app.schemas import QueryResult
+
 
 
 def test_mock_facade_supports_manual_pair_and_database_shaped_answer():
