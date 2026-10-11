@@ -193,10 +193,13 @@ def delete_object(facade, object_id):
 
 
 def delete_zone(facade, zone_id):
-    if not zone_id.strip():
+    zone_id = zone_id.strip()
+    if not zone_id:
         raise ValueError("Enter the zone ID to delete.")
-    facade.delete_zone(zone_id.strip())
-    return f"Disabled zone `{zone_id.strip()}`. Historical event evidence remains available."
+    if zone_id not in {zone.id for zone in facade.get_zones()}:
+        raise ValueError(f"No active zone has ID `{zone_id}`. Check the Loaded regions table on Setup.")
+    facade.delete_zone(zone_id)
+    return f"Disabled zone `{zone_id}`. Historical event evidence remains available."
 
 
 def start_watch(facade: LocalRecallFacade):
@@ -226,6 +229,6 @@ def restore_mock_demo(facade: LocalRecallFacade) -> str:
     restore()
     return (
         "Restored mock demo data: **Keys**, three zones, event **#1** (accepted), "
-        "and event **#2** (pending review). Refresh tables from the Memory tab or wait for the status timer."
+        "and event **#2** (pending review). Open the Memory tab to see them."
     )
 

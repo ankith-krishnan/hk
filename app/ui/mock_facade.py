@@ -57,7 +57,6 @@ class MockFacade:
                 model_name="MOCK",
             ),
         ]
-        self._state_zone = "right_tray"
         self._before_path, self._after_path = self._make_evidence()
         self.events[0] = self.events[0].model_copy(
             update={"pre_image_path": str(self._before_path), "post_image_path": str(self._after_path)}
@@ -121,21 +120,28 @@ class MockFacade:
     def analyze_pair(self, before: np.ndarray, after: np.ndarray) -> EventRecord:
         if before is None or after is None:
             raise ValueError("Both images are required")
+        if not self.zones:
+            raise ValueError("Load demo zones before analyzing an image pair.")
+        if not self.objects:
+            raise ValueError("Enroll at least one object before analyzing an image pair.")
+        obj = self.objects[0]
+        source, target = self.zones[0], self.zones[-1]
         event = EventRecord(
             id=max((record.id for record in self.events), default=0) + 1,
             event_type="move",
-            object_id="keys",
-            from_zone_id="left_tray",
-            to_zone_id="right_tray",
+            object_id=obj.id,
+            from_zone_id=source.id,
+            to_zone_id=target.id,
             confidence=0.91,
             accepted=True,
-            visible_evidence=["MOCK fixture: registered keys moved from left tray to right tray."],
+            visible_evidence=[
+                f"MOCK fixture: {obj.display_name} moved from {source.display_name} to {target.display_name}."
+            ],
             model_name="MOCK",
             pre_image_path=str(self._before_path),
             post_image_path=str(self._after_path),
         )
-        self.events.insert(0, event)
-        self._state_zone = "right_tray"
+        self.events.append(event)
         return event
 
     def get_objects(self):
@@ -145,18 +151,39 @@ class MockFacade:
         return list(self.zones)
 
     def get_events(self, limit: int = 50):
-        return self.events[:limit]
+        return sorted(self.events, key=lambda event: event.id, reverse=True)[:limit]
+
+    def _zone_name(self, zone_id: str | None) -> str | None:
+        if zone_id is None:
+            return None
+        zone = next((zone for zone in self.zones if zone.id == zone_id), None)
+        return zone.display_name if zone else zone_id.replace("_", " ").title()
+
+    def _last_location_event(self, object_id: str) -> EventRecord | None:
+        return next(
+            (
+                event
+                for event in self.get_events(len(self.events))
+                if event.accepted
+                and event.object_id == object_id
+                and event.event_type in {"move", "appear", "disappear"}
+            ),
+            None,
+        )
 
     def get_current_state(self):
-        return [
-            {
-                "object_id": obj.id,
-                "display_name": obj.display_name,
-                "zone_name": self._state_zone.replace("_", " ").title() if obj.id == "keys" and self.events else None,
-                "last_event_id": next((event.id for event in self.events if event.accepted and event.object_id == obj.id), None),
-            }
-            for obj in self.objects
-        ]
+        rows = []
+        for obj in self.objects:
+            event = self._last_location_event(obj.id)
+            rows.append(
+                {
+                    "object_id": obj.id,
+                    "display_name": obj.display_name,
+                    "zone_name": self._zone_name(event.to_zone_id) if event else None,
+                    "last_event_id": event.id if event else None,
+                }
+            )
+        return rows
 
     def start_watch(self):
         if self.get_status().source_connected:
@@ -194,7 +221,7 @@ class MockFacade:
                 confidence=event.confidence,
             )
         if any(phrase in lower for phrase in ("what moved", "most recently", "most recent")):
-            event = next((item for item in self.events if item.accepted), None)
+            event = next((item for item in self.get_events(len(self.events)) if item.accepted), None)
             if event is None:
                 return QueryResult(answer="MOCK: no accepted events yet.")
             return QueryResult(
@@ -203,18 +230,35 @@ class MockFacade:
                 evidence_paths=self._event_evidence_paths(event),
                 confidence=event.confidence,
             )
-        if "key" in lower:
-            event = next((item for item in self.events if item.accepted), None)
+        obj = next(
+            (
+                item
+                for item in self.objects
+                if any(name.lower().rstrip("s") in lower for name in (item.id, item.display_name, *item.aliases) if name)
+            ),
+            None,
+        )
+        if obj is not None:
+            event = self._last_location_event(obj.id)
+            if event is None:
+                return QueryResult(answer=f"MOCK: I do not have a reliable observation yet for {obj.display_name}.")
+            location = self._zone_name(event.to_zone_id) or "outside the visible workspace"
             return QueryResult(
-                answer=f"MOCK: Keys were last observed in {self._state_zone.replace('_', ' ').title()}.",
-                event_ids=[event.id] if event else [],
+                answer=f"MOCK: {obj.display_name} was last observed in {location} (event #{event.id}).",
+                event_ids=[event.id],
                 evidence_paths=self._event_evidence_paths(event),
-                confidence=event.confidence if event else None,
+                confidence=event.confidence,
             )
         return QueryResult(answer="MOCK: no fixture answer for that question.")
 
     def enroll_object(self, display_name: str, description: str, reference_image: np.ndarray):
         object_id = "".join(char.lower() if char.isalnum() else "_" for char in display_name).strip("_")
+        if not object_id:
+            raise ValueError("MOCK: object name needs at least one letter or number.")
+        if any(obj.id == object_id for obj in self.objects):
+            raise ValueError(f"Object ID already exists: {object_id}")
+        if len(self.objects) >= 5:
+            raise ValueError("The demo object registry is limited to five active objects")
         record = ObjectRecord(id=object_id, display_name=display_name, aliases=[description] if description else [])
         self.objects.append(record)
         return record
@@ -228,6 +272,15 @@ class MockFacade:
         return list(self.zones)
 
     def add_zone(self, display_name, zone_id, x1, y1, x2, y2):
+        import re
+
+        zone_id = zone_id.strip().lower()
+        if not re.fullmatch(r"[a-z][a-z0-9_]{0,39}", zone_id):
+            raise ValueError("MOCK: enter a lowercase zone ID such as `shelf`.")
+        if any(zone.id == zone_id for zone in self.zones):
+            raise ValueError(f"MOCK: zone `{zone_id}` already exists.")
+        if len(self.zones) >= 4:
+            raise ValueError("MOCK: the workspace is limited to four named zones.")
         record = ZoneRecord(
             id=zone_id,
             display_name=display_name,
@@ -240,8 +293,6 @@ class MockFacade:
         if not any(obj.id == object_id for obj in self.objects):
             raise KeyError(f"object {object_id} not found")
         self.objects = [obj for obj in self.objects if obj.id != object_id]
-        if not self.objects:
-            self._state_zone = ""
 
     def delete_zone(self, zone_id: str):
         self.zones = [zone for zone in self.zones if zone.id != zone_id]
@@ -287,8 +338,16 @@ class MockFacade:
         return {"mode": "mock", "model_ready": False, "event_count": len(self.events)}
 
     def export_session(self):
+        import json
+
         path = self._temp / "mock-session.json"
-        path.write_text("MOCK fixture export", encoding="utf-8")
+        payload = {
+            "mode": "MOCK",
+            "objects": [obj.model_dump(mode="json") for obj in self.objects],
+            "zones": [zone.model_dump(mode="json") for zone in self.zones],
+            "events": [event.model_dump(mode="json") for event in self.get_events(len(self.events))],
+        }
+        path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         return path
 
     def delete_all_memory(self):

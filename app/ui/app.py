@@ -102,7 +102,7 @@ def create_app(facade, *, temp_allowed_path: str | None = None) -> gr.Blocks:
                     gr.Markdown(
                         "This optional stream sends laptop-browser frames to the local app and reports "
                         "whether frames arrive. Automatic movement analysis is not enabled in this build. "
-                        "Use the two image boxes above to ask Qwen to analyze a change.",
+                        "Use the two image boxes above to analyze a change.",
                         elem_classes=["lr-note"],
                     )
                     with gr.Row():
@@ -150,7 +150,6 @@ def create_app(facade, *, temp_allowed_path: str | None = None) -> gr.Blocks:
                     review_id = gr.Number(label="Event ID to review", precision=0)
                     approve = gr.Button("Approve event")
                     reject = gr.Button("Reject event")
-                correction_id = gr.Number(label="Event ID to correct", precision=0)
                 review_result = gr.Markdown(
                     "Choose an event ID from **Events awaiting review**, then approve or reject."
                 )
@@ -160,6 +159,7 @@ def create_app(facade, *, temp_allowed_path: str | None = None) -> gr.Blocks:
                     elem_classes=["lr-note"],
                 )
                 with gr.Row():
+                    correction_id = gr.Number(label="Event ID to correct", precision=0)
                     correction_type = gr.Dropdown(
                         choices=["move", "appear", "disappear", "no_change"],
                         value="move",

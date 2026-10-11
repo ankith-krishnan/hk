@@ -65,6 +65,14 @@ def test_save_zone_validates_rectangle(facade):
         callbacks.save_zone(facade, "Shelf", "shelf", 0.5, 0.0, 0.2, 1.0)
 
 
+def test_mock_save_zone_matches_backend_id_rules(facade):
+    with pytest.raises(ValueError, match="lowercase"):
+        callbacks.save_zone(facade, "Shelf", "Shelf Area", 0, 0, 0.5, 0.5)
+    with pytest.raises(ValueError, match="already exists"):
+        callbacks.save_zone(facade, "Left", "left_tray", 0, 0, 0.5, 0.5)
+    assert "shelf" in callbacks.save_zone(facade, "Shelf", "shelf", 0, 0, 0.5, 0.5)
+
+
 def test_review_and_correction(facade):
     pending = next(event for event in facade.events if not event.accepted)
     summary = callbacks.decide_event(facade, float(pending.id), "approve")
@@ -91,6 +99,37 @@ def test_unknown_or_blank_ids_explain_next_step(facade):
         callbacks.correct_event(facade, 1, "move", "keys", "nowhere", "right_tray")
     with pytest.raises(ValueError, match="No enrolled object"):
         callbacks.delete_object(facade, "wallet")
+    with pytest.raises(ValueError, match="No active zone"):
+        callbacks.delete_zone(facade, "garage")
+
+
+def test_mock_location_follows_review_and_correction(facade):
+    assert facade.get_current_state()[0]["zone_name"] == "Right Tray"
+    callbacks.decide_event(facade, 2, "approve")
+    assert facade.get_current_state()[0]["zone_name"] == "Left Tray"
+    callbacks.decide_event(facade, 2, "reject")
+    callbacks.correct_event(facade, 1, "move", "keys", "right_tray", "center_mat")
+    assert facade.get_current_state()[0]["zone_name"] == "Center Mat"
+    answer, _ = callbacks.ask(facade, "Where are my keys?")
+    assert "Center Mat" in answer
+
+
+def test_mock_does_not_invent_answers_or_events_after_delete(facade):
+    image = np.zeros((8, 8, 3), dtype=np.uint8)
+    callbacks.delete_all_memory(facade, True)
+    answer, gallery = callbacks.ask(facade, "Where are my keys?")
+    assert "Right Tray" not in answer and gallery == []
+    with pytest.raises(ValueError, match="Load demo zones"):
+        callbacks.analyze_pair(facade, image, image)
+    callbacks.load_zones(facade)
+    with pytest.raises(ValueError, match="Enroll at least one object"):
+        callbacks.analyze_pair(facade, image, image)
+
+
+def test_mock_rejects_duplicate_enroll(facade):
+    image = np.zeros((8, 8, 3), dtype=np.uint8)
+    with pytest.raises(ValueError, match="already exists"):
+        callbacks.enroll_object(facade, "Keys", "", image)
 
 
 def test_delete_all_memory_requires_confirmation(facade):
