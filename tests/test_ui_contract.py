@@ -1,11 +1,11 @@
 import numpy as np
 import pytest
+
 from app.schemas import QueryResult
 from app.ui.app import create_app
-from app.ui.callbacks import analyze_pair, ask, refresh_event_rows, refresh_setup_rows
+from app.ui.callbacks import analyze_pair, ask, refresh_all, refresh_event_rows, refresh_setup_rows
 from app.ui.mock_facade import MockFacade
-from app.ui.transforms import query_markdown, source_status_markdown
-
+from app.ui.transforms import event_rows, query_markdown, source_status_markdown
 
 
 def test_mock_facade_supports_manual_pair_and_database_shaped_answer():
@@ -50,10 +50,33 @@ def test_mock_refresh_rows_are_readable_and_do_not_expose_paths():
     zones, objects = refresh_setup_rows(facade)
 
     assert events[0][0] == 1
-    assert events[0][5] == "91%"
+    assert events[0][1].endswith("UTC")
+    assert events[0][6] == "91%"
     assert zones[0][1] == "left_tray"
     assert objects[0][0] == "Keys"
     assert all("localrecall-mock" not in str(row) for row in objects)
+
+
+def test_event_rows_format_started_at_as_utc():
+    event = MockFacade().events[0].model_copy(update={"started_at": "2026-01-02T03:04:05+00:00"})
+
+    assert event_rows([event])[0][1] == "2026-01-02 03:04:05 UTC"
+
+
+def test_refresh_all_reads_status_once():
+    class CountingFacade(MockFacade):
+        status_calls = 0
+
+        def get_status(self):
+            self.status_calls += 1
+            return super().get_status()
+
+    facade = CountingFacade()
+
+    outputs = refresh_all(facade)
+
+    assert len(outputs) == 10
+    assert facade.status_calls == 1
 
 
 def test_ask_requires_a_question_and_returns_one_gallery_item_per_evidence_path():
@@ -82,4 +105,3 @@ def test_query_without_evidence_does_not_claim_a_citation():
 
     assert "No saved event supports" in rendered
     assert "No event citation" not in rendered
-

@@ -69,8 +69,8 @@ def ingest_browser_frame(facade: LocalRecallFacade, frame: np.ndarray | None, so
     return f"Frame received · {receipt['frames_received']} total · {receipt['ingest_fps']} fps"
 
 
-def refresh(facade: LocalRecallFacade):
-    status = facade.get_status()
+def refresh(facade: LocalRecallFacade, *, status=None):
+    status = status or facade.get_status()
     objects = facade.get_objects()
     state_rows = {row["object_id"]: row for row in facade.get_current_state()}
     events = facade.get_events(12)
@@ -109,10 +109,32 @@ def refresh_setup_rows(facade: LocalRecallFacade):
     return zone_rows(facade.get_zones()), object_rows(facade.get_objects())
 
 
-def refresh_source_status(facade: LocalRecallFacade):
+def refresh_source_status(facade: LocalRecallFacade, *, status=None):
     """Return only cheap browser-ingress health for the Watch tab."""
 
-    return source_status_markdown(facade.get_status())
+    return source_status_markdown(status or facade.get_status())
+
+
+def refresh_all(facade: LocalRecallFacade):
+    """Build every timer-refresh output from one shared system-status read."""
+
+    status = facade.get_status()
+    status_text, objects, gallery, pending = refresh(facade, status=status)
+    events = refresh_event_rows(facade)
+    zones, registered_objects = refresh_setup_rows(facade)
+    source = refresh_source_status(facade, status=status)
+    return (
+        status_text,
+        status_text,
+        source,
+        source,
+        objects,
+        events,
+        gallery,
+        pending,
+        zones,
+        registered_objects,
+    )
 
 
 def decide_event(facade: LocalRecallFacade, event_id: float | None, decision: str):

@@ -7,6 +7,8 @@ backend IDs or JSON to understand what LocalRecall observed.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from app.schemas import EventRecord, QueryResult, SystemStatus
 
 
@@ -85,12 +87,30 @@ def source_status_markdown(status: SystemStatus) -> str:
     return f"**Laptop browser frame status:** {state}  \n{next_step}"
 
 
+def format_event_timestamp(value: object) -> str:
+    """Format an event timestamp consistently in UTC without breaking the timeline."""
+
+    try:
+        if isinstance(value, datetime):
+            timestamp = value
+        elif isinstance(value, str):
+            timestamp = datetime.fromisoformat(value)
+        else:
+            return "Unknown time"
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=UTC)
+        return timestamp.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
+    except (TypeError, ValueError, OverflowError, OSError):
+        return "Unknown time"
+
+
 def event_rows(events: list[EventRecord]) -> list[list[object]]:
     """Create readable timeline rows while retaining the raw event ID."""
 
     return [
         [
             event.id,
+            format_event_timestamp(event.started_at),
             event.object_id or "Unknown",
             event.event_type.replace("_", " "),
             event.from_zone_id or "—",

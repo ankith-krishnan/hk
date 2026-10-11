@@ -24,6 +24,12 @@ from app.ui import callbacks
 from app.ui.mock_facade import MockFacade
 
 
+def build_refresh_outputs(facade):
+    """Build timer outputs while reading backend health only once."""
+
+    return callbacks.refresh_all(facade)
+
+
 def create_app(facade, *, temp_allowed_path: str | None = None) -> gr.Blocks:
     data_path = Path("./data").resolve()
     allowed_paths = [str(data_path)]
@@ -172,7 +178,16 @@ def create_app(facade, *, temp_allowed_path: str | None = None) -> gr.Blocks:
                         interactive=False,
                     )
                     event_table = gr.Dataframe(
-                        headers=["Event", "Object", "Type", "From", "To", "Confidence", "Memory state"],
+                        headers=[
+                            "Event",
+                            "Timestamp (UTC)",
+                            "Object",
+                            "Type",
+                            "From",
+                            "To",
+                            "Confidence",
+                            "Memory state",
+                        ],
                         label="Recent event timeline",
                         interactive=False,
                     )
@@ -366,11 +381,7 @@ def create_app(facade, *, temp_allowed_path: str | None = None) -> gr.Blocks:
 
         def refresh_all():
             try:
-                status, objects, gallery, pending = callbacks.refresh(facade)
-                events = callbacks.refresh_event_rows(facade)
-                zones, registered_objects = callbacks.refresh_setup_rows(facade)
-                source = callbacks.refresh_source_status(facade)
-                return status, status, source, source, objects, events, gallery, pending, zones, registered_objects
+                return build_refresh_outputs(facade)
             except Exception as exc:  # noqa: BLE001 - status polling must show unexpected backend errors
                 message = f"Status unavailable: {exc}"
                 return message, message, message, message, [], [], [], [], [], []
