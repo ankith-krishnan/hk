@@ -5,7 +5,15 @@ from __future__ import annotations
 import numpy as np
 
 from app.contracts import LocalRecallFacade
-from app.ui.transforms import event_markdown, query_markdown, status_markdown
+from app.ui.transforms import (
+    event_markdown,
+    event_rows,
+    object_rows,
+    query_markdown,
+    source_status_markdown,
+    status_markdown,
+    zone_rows,
+)
 
 
 def analyze_pair(facade: LocalRecallFacade, before: np.ndarray | None, after: np.ndarray | None):
@@ -25,8 +33,15 @@ def analyze_pair(facade: LocalRecallFacade, before: np.ndarray | None, after: np
 
 
 def ask(facade: LocalRecallFacade, question: str):
+    question = question.strip()
+    if not question:
+        raise ValueError("Ask a question such as ‘Where are my keys?’.")
     result = facade.ask(question)
-    gallery = [(path, f"Evidence for event #{event_id}") for path in result.evidence_paths for event_id in result.event_ids]
+    if result.event_ids:
+        cited = ", ".join(f"#{event_id}" for event_id in result.event_ids)
+        gallery = [(path, f"Evidence for event(s) {cited}") for path in result.evidence_paths]
+    else:
+        gallery = []
     return query_markdown(result), gallery
 
 
@@ -54,8 +69,8 @@ def ingest_browser_frame(facade: LocalRecallFacade, frame: np.ndarray | None, so
     return f"Frame received · {receipt['frames_received']} total · {receipt['ingest_fps']} fps"
 
 
-def refresh(facade: LocalRecallFacade):
-    status = facade.get_status()
+def refresh(facade: LocalRecallFacade, *, status=None):
+    status = status or facade.get_status()
     objects = facade.get_objects()
     state_rows = {row["object_id"]: row for row in facade.get_current_state()}
     events = facade.get_events(12)
@@ -80,6 +95,46 @@ def refresh(facade: LocalRecallFacade):
         if not event.accepted
     ]
     return status_markdown(status), rows, gallery, pending
+
+
+def refresh_event_rows(facade: LocalRecallFacade):
+    """Return the timeline rows used by the Memory tab."""
+
+    return event_rows(facade.get_events(12))
+
+
+def refresh_setup_rows(facade: LocalRecallFacade):
+    """Return setup registries without leaking backend filesystem paths."""
+
+    return zone_rows(facade.get_zones()), object_rows(facade.get_objects())
+
+
+def refresh_source_status(facade: LocalRecallFacade, *, status=None):
+    """Return only cheap browser-ingress health for the Watch tab."""
+
+    return source_status_markdown(status or facade.get_status())
+
+
+def refresh_all(facade: LocalRecallFacade):
+    """Build every timer-refresh output from one shared system-status read."""
+
+    status = facade.get_status()
+    status_text, objects, gallery, pending = refresh(facade, status=status)
+    events = refresh_event_rows(facade)
+    zones, registered_objects = refresh_setup_rows(facade)
+    source = refresh_source_status(facade, status=status)
+    return (
+        status_text,
+        status_text,
+        source,
+        source,
+        objects,
+        events,
+        gallery,
+        pending,
+        zones,
+        registered_objects,
+    )
 
 
 def decide_event(facade: LocalRecallFacade, event_id: float | None, decision: str):

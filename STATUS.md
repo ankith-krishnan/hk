@@ -81,3 +81,11 @@ Initial interpretation: this is an ARM64 Ubuntu GB10 environment with a suitable
 - Verification: no tests or browser launch were run in this milestone. The UI layout still needs a visual check in mock mode at laptop and narrow widths.
 - Current observed model setup: Docker image `vllm/vllm-openai:qwen38` is present; Docker volume `localrecall-qwen38-cache` was not present at the latest inspection, so the first model start still needs to download weights.
 - Next: view the mock UI in a browser, confirm all five tabs and image-pair flow, then adjust any layout issues found. Keep auto Watch disabled until the real local image and manual database/query gates pass.
+
+### Frontend A: completed presentation layer
+
+- Implemented: strengthened the first-use Gradio experience with a prominent Manual Remember callout, explicit laptop-browser camera instructions, live stale/disconnected ingress status, readable event confidence/memory-state language, evidence-backed Ask output, Setup tables for zones and registered objects, and a local/privacy explanation panel.
+- Implemented: moved timeline/setup formatting into UI callbacks and presentation transforms; improved the mock facade so Ask displays fixture evidence and reports fixture evidence counts without initializing backend storage.
+- Changed: `app/ui/app.py`, `app/ui/callbacks.py`, `app/ui/transforms.py`, `app/ui/mock_facade.py`, `tests/test_ui_contract.py`, and `UI_HANDOFF.md`.
+- Verification: `git diff --check` passed. Automated Python tests, Ruff, and browser launch were not run because this Windows workspace has no Python interpreter, `.venv`, or WSL installation available.
+- Not verified: visual browser review, `python -m app.ui.app --mock --port 7861`, `pytest tests/test_ui_contract.py`, and `ruff check app scripts tests`. These remain the next verification step on the project’s Linux/Python environment.
